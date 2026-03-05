@@ -1,42 +1,49 @@
 # WorkflowFiesta Runner
 
-A self-hosted runner for [WorkflowFiesta](https://github.com/your-org/workflowfiesta) that connects via WebSocket and executes jobs in Docker containers on your own infrastructure.
+A self-hosted runner for [WorkflowFiesta](https://github.com/ss-libs/workflowfiesta) that connects via WebSocket and executes jobs in isolated containers on your own infrastructure. Supports both Docker and Kubernetes.
 
 ## What it does
 
 The runner:
 1. Connects to your WorkflowFiesta API via WebSocket
 2. Listens for incoming job assignments
-3. Pulls the specified Docker image and runs the job script inside a container
+3. Runs the job script inside an isolated container (Docker or Kubernetes)
 4. Streams output back to the API in real time
 5. Reports the exit code and final output when the job completes
+
+## Container runtimes
+
+The runner auto-detects the environment:
+
+- **Docker** (default) — pulls the image and runs a container via the Docker socket. Used when running directly on a host or inside Docker Compose.
+- **Kubernetes** — creates a one-shot `Job` for each script, streams logs from the pod, and deletes the Job on completion. Activated automatically when `KUBERNETES_SERVICE_HOST` is set (i.e. inside any pod), or explicitly via `CONTAINER_RUNTIME=kubernetes`.
 
 ## Installation
 
 ### Download a pre-built binary
 
-Download the latest release binary for your platform from the [releases page](https://github.com/your-org/workflowfiesta-runner/releases).
+Download the latest release binary for your platform from the [releases page](https://github.com/ss-libs/workflowfiesta-runner/releases).
 
 ```sh
 # Linux amd64 example
-curl -L https://github.com/your-org/workflowfiesta-runner/releases/latest/download/workflowfiesta-runner-linux-amd64 \
+curl -L https://github.com/ss-libs/workflowfiesta-runner/releases/latest/download/workflowfiesta-runner-linux-amd64 \
   -o /usr/local/bin/workflowfiesta-runner
 chmod +x /usr/local/bin/workflowfiesta-runner
 ```
 
 ### Build from source
 
-Requires Go 1.23+ and Docker.
+Requires Go 1.24+.
 
 ```sh
-git clone https://github.com/your-org/workflowfiesta-runner
+git clone https://github.com/ss-libs/workflowfiesta-runner
 cd workflowfiesta-runner
 go build -o workflowfiesta-runner ./cmd/runner
 ```
 
 ## Registration
 
-Before the runner can connect, it must be registered with your WorkflowFiesta instance to obtain a token.
+Before the runner can connect, register it with your WorkflowFiesta instance to obtain a token.
 
 ```sh
 workflowfiesta-runner register \
@@ -49,7 +56,7 @@ This prints the runner ID and token. Save them — the token is shown only once.
 
 ## Running
 
-Set the required environment variables and start the runner:
+### On a host (Docker mode)
 
 ```sh
 export WORKFLOWFIESTA_API_URL=http://your-workflowfiesta:3001
@@ -60,11 +67,9 @@ export WORKFLOWFIESTA_RUNNER_NAME=my-runner
 workflowfiesta-runner run
 ```
 
-The runner will connect to the API, then wait for jobs. It automatically reconnects if the connection drops.
+### As a Docker container
 
-## Docker usage
-
-Run the runner as a Docker container. The Docker socket must be mounted so the runner can start job containers.
+Mount the Docker socket so the runner can start job containers.
 
 ```sh
 docker run -d \
@@ -75,7 +80,7 @@ docker run -d \
   -e WORKFLOWFIESTA_TOKEN=<your-token> \
   -e WORKFLOWFIESTA_RUNNER_ID=<your-runner-id> \
   -e WORKFLOWFIESTA_RUNNER_NAME=my-runner \
-  ghcr.io/your-org/workflowfiesta-runner:latest
+  ghcr.io/ss-libs/workflowfiesta-runner:latest
 ```
 
 Build the image locally:
@@ -84,21 +89,47 @@ Build the image locally:
 docker build -t workflowfiesta-runner .
 ```
 
+### On Kubernetes
+
+Deploy the runner as a Deployment. No Docker socket mount is needed — the runner creates Kubernetes Jobs instead.
+
+```yaml
+# k8s/runner/deployment.yaml (included in the workflowfiesta repo)
+env:
+  - name: CONTAINER_RUNTIME
+    value: kubernetes
+  - name: KUBERNETES_NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
+```
+
+The runner pod needs a ServiceAccount with permission to manage `batch/jobs` and read `pods`/`pods/log`. Reference RBAC manifests are included in the WorkflowFiesta repo at `k8s/runner/`.
+
+```sh
+kubectl apply -f k8s/runner/serviceaccount.yaml
+kubectl apply -f k8s/runner/rbac.yaml
+kubectl apply -f k8s/runner/deployment.yaml
+```
+
 ## Environment variables
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `WORKFLOWFIESTA_TOKEN` | Yes | — | Runner authentication token (obtained via `register`) |
-| `WORKFLOWFIESTA_API_URL` | No | `http://localhost:3001` | Base URL of the WorkflowFiesta API |
-| `WORKFLOWFIESTA_RUNNER_ID` | No | — | Runner ID (obtained via `register`) |
-| `WORKFLOWFIESTA_RUNNER_NAME` | No | `unnamed-runner` | Human-readable runner name shown in the UI |
-| `WORKFLOWFIESTA_LABELS` | No | — | Comma-separated labels (e.g. `linux,x86_64,gpu`) for job routing |
-| `DOCKER_SOCKET` | No | `/var/run/docker.sock` | Path to the Docker daemon socket |
+| Variable | Default | Description |
+|---|---|---|
+| `WORKFLOWFIESTA_TOKEN` | — | Runner authentication token (required) |
+| `WORKFLOWFIESTA_API_URL` | `http://localhost:3001` | Base URL of the WorkflowFiesta API |
+| `WORKFLOWFIESTA_RUNNER_ID` | — | Runner ID obtained via `register` |
+| `WORKFLOWFIESTA_RUNNER_NAME` | `unnamed-runner` | Human-readable name shown in the UI |
+| `WORKFLOWFIESTA_LABELS` | — | Comma-separated labels (e.g. `linux,x86_64,gpu`) for job routing |
+| `CONTAINER_RUNTIME` | auto-detect | `docker` or `kubernetes` |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker daemon socket path (Docker mode only) |
+| `KUBERNETES_NAMESPACE` | `default` | Namespace in which to create Jobs (Kubernetes mode) |
+| `KUBERNETES_IMAGE_PULL_SECRET` | — | `imagePullSecrets` name for private registries (Kubernetes mode) |
 
 ## Commands
 
 ```
-workflowfiesta-runner run                       Start the runner
-workflowfiesta-runner register --api-url ...   Register a new runner
-workflowfiesta-runner version                   Print version
+workflowfiesta-runner run                      Start the runner
+workflowfiesta-runner register --api-url ...  Register a new runner
+workflowfiesta-runner version                  Print version
 ```
