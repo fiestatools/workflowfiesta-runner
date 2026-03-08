@@ -7,8 +7,9 @@ import (
 	"workflowfiesta-runner/internal/config"
 )
 
-// Input contains everything needed to run a script in a container.
+// Input contains everything needed to run a script.
 type Input struct {
+	JobID      string
 	Image      string
 	Script     string
 	EnvVars    map[string]string
@@ -21,8 +22,15 @@ type Executor interface {
 	Execute(ctx context.Context, input Input) (exitCode int, err error)
 }
 
-// New returns a Docker or Kubernetes executor based on config.
+// New returns an executor based on config.
 func New(cfg *config.Config) Executor {
+	if cfg.ExecutorType == "local" {
+		lc := cfg.LocalConfig
+		if lc != nil {
+			lc.RunnerName = cfg.Name
+		}
+		return newLocalExecutor(lc)
+	}
 	if cfg.ExecutorType == "kubernetes" {
 		return &kubernetesExecutor{cfg: cfg}
 	}

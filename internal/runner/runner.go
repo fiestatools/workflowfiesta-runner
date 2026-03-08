@@ -85,6 +85,7 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	}()
 
 	exitCode, err := r.executor.Execute(ctx, executor.Input{
+		JobID:      job.JobID,
 		Image:      job.DockerImage,
 		Script:     job.Script,
 		EnvVars:    job.EnvVars,

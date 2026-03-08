@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"strings"
+
+	"workflowfiesta-runner/internal/localconfig"
 )
 
 type Config struct {
@@ -12,9 +14,11 @@ type Config struct {
 	Name                string
 	DockerSocket        string
 	Labels              []string
-	ExecutorType        string // "docker" or "kubernetes"
+	ExecutorType        string // "docker", "kubernetes", or "local"
 	KubeNamespace       string // KUBERNETES_NAMESPACE
 	KubeImagePullSecret string // KUBERNETES_IMAGE_PULL_SECRET
+	LocalConfigPath     string // path to runner.yaml (local executor only)
+	LocalConfig         *localconfig.LocalConfig // loaded local config (set by run-local)
 }
 
 func Load() *Config {
@@ -33,7 +37,7 @@ func Load() *Config {
 		dockerSocket = "/var/run/docker.sock"
 	}
 
-	// Determine executor type: explicit override, k8s auto-detect, or docker
+	// Determine executor type: explicit override, k8s auto-detect, or docker.
 	executorType := os.Getenv("CONTAINER_RUNTIME")
 	if executorType == "" {
 		if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
@@ -41,6 +45,11 @@ func Load() *Config {
 		} else {
 			executorType = "docker"
 		}
+	}
+
+	localConfigPath := os.Getenv("LOCAL_CONFIG_PATH")
+	if localConfigPath == "" {
+		localConfigPath = localconfig.DefaultPath()
 	}
 
 	return &Config{
@@ -53,6 +62,7 @@ func Load() *Config {
 		ExecutorType:        executorType,
 		KubeNamespace:       getEnv("KUBERNETES_NAMESPACE", "default"),
 		KubeImagePullSecret: os.Getenv("KUBERNETES_IMAGE_PULL_SECRET"),
+		LocalConfigPath:     localConfigPath,
 	}
 }
 
