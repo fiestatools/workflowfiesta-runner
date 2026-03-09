@@ -46,7 +46,7 @@ func (d *dockerExecutor) Execute(ctx context.Context, input Input) (int, error) 
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{
 			Image: input.Image,
-			Cmd:   []string{"/bin/sh", "-c", input.Script},
+			Cmd:   []string{"/bin/bash", "-c", input.Script},
 			Env:   env,
 		},
 		&container.HostConfig{

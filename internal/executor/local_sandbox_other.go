@@ -19,13 +19,21 @@ func runWithSandbox(ctx context.Context, cfg *localconfig.LocalConfig, script st
 		log.Warnf("[local] kernel-level sandboxing is not supported on %s; running with process-level controls only", runtime.GOOS)
 	}
 
-	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		// On Windows, use PowerShell for script execution.
-		cmd = exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", script)
+		cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+		cmd.Env = env
+		cmd.Dir = dir
+		return execAndStream(ctx, cmd, outputChan)
 	}
+
+	scriptPath, cleanup, err := writeScriptTempFile(script)
+	if err != nil {
+		return -1, err
+	}
+	defer cleanup()
+
+	cmd := exec.CommandContext(ctx, "/bin/sh", scriptPath)
 	cmd.Env = env
 	cmd.Dir = dir
 	return execAndStream(ctx, cmd, outputChan)

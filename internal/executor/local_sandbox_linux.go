@@ -22,7 +22,12 @@ import (
 // and optional network namespace restriction on Linux.
 func runWithSandbox(ctx context.Context, cfg *localconfig.LocalConfig, script string, env []string, dir string, outputChan chan<- string) (int, error) {
 	if cfg.Sandbox != "kernel" {
-		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+		scriptPath, cleanup, err := writeScriptTempFile(script)
+		if err != nil {
+			return -1, err
+		}
+		defer cleanup()
+		cmd := exec.CommandContext(ctx, "/bin/sh", scriptPath)
 		cmd.Env = env
 		cmd.Dir = dir
 		return execAndStream(ctx, cmd, outputChan)
@@ -49,11 +54,18 @@ func runWithSandbox(ctx context.Context, cfg *localconfig.LocalConfig, script st
 			return
 		}
 
+		scriptPath, cleanup, err := writeScriptTempFile(script)
+		if err != nil {
+			resultCh <- result{-1, err}
+			return
+		}
+		defer cleanup()
+
 		var cmd *exec.Cmd
 		if cfg.Network == "none" {
-			cmd = buildUnsharedNetCmd(ctx, script)
+			cmd = buildUnsharedNetCmd(ctx, scriptPath)
 		} else {
-			cmd = exec.CommandContext(ctx, "/bin/sh", "-c", script)
+			cmd = exec.CommandContext(ctx, "/bin/sh", scriptPath)
 		}
 		cmd.Env = env
 		cmd.Dir = dir
@@ -190,15 +202,15 @@ func addLandlockPath(rulesetFd int, path string, access uint64) error {
 	return landlockAddPathBeneathRule(rulesetFd, &attr)
 }
 
-// buildUnsharedNetCmd wraps the script in `unshare -n` to isolate the network namespace.
-func buildUnsharedNetCmd(ctx context.Context, script string) *exec.Cmd {
+// buildUnsharedNetCmd wraps the script file in `unshare -n` to isolate the network namespace.
+func buildUnsharedNetCmd(ctx context.Context, scriptPath string) *exec.Cmd {
 	// Try unshare (requires user namespaces, available on most modern Linux).
 	unshare, err := exec.LookPath("unshare")
 	if err != nil {
 		log.Warn("[local] 'unshare' not found — running with network access despite network: none")
-		return exec.CommandContext(ctx, "/bin/sh", "-c", script)
+		return exec.CommandContext(ctx, "/bin/sh", scriptPath)
 	}
-	return exec.CommandContext(ctx, unshare, "-n", "/bin/sh", "-c", script)
+	return exec.CommandContext(ctx, unshare, "-n", "/bin/sh", scriptPath)
 }
 
 func expandTildeLocal(path string) string {

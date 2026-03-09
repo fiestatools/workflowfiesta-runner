@@ -17,8 +17,14 @@ import (
 // runWithSandbox on macOS wraps the script with sandbox-exec and a generated
 // Seatbelt profile when sandbox: kernel is configured.
 func runWithSandbox(ctx context.Context, cfg *localconfig.LocalConfig, script string, env []string, dir string, outputChan chan<- string) (int, error) {
+	scriptPath, cleanup, err := writeScriptTempFile(script)
+	if err != nil {
+		return -1, err
+	}
+	defer cleanup()
+
 	if cfg.Sandbox != "kernel" {
-		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+		cmd := exec.CommandContext(ctx, "/bin/sh", scriptPath)
 		cmd.Env = env
 		cmd.Dir = dir
 		return execAndStream(ctx, cmd, outputChan)
@@ -32,13 +38,13 @@ func runWithSandbox(ctx context.Context, cfg *localconfig.LocalConfig, script st
 	sandboxExec, lookErr := exec.LookPath("sandbox-exec")
 	if lookErr != nil {
 		log.Warn("[local] sandbox-exec not found — running without macOS kernel sandbox")
-		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+		cmd := exec.CommandContext(ctx, "/bin/sh", scriptPath)
 		cmd.Env = env
 		cmd.Dir = dir
 		return execAndStream(ctx, cmd, outputChan)
 	}
 
-	cmd := exec.CommandContext(ctx, sandboxExec, "-p", profile, "/bin/sh", "-c", script)
+	cmd := exec.CommandContext(ctx, sandboxExec, "-p", profile, "/bin/sh", scriptPath)
 	cmd.Env = env
 	cmd.Dir = dir
 	return execAndStream(ctx, cmd, outputChan)

@@ -207,6 +207,29 @@ func (e *localExecutor) writeAudit(entry auditEntry) {
 	f.Write(append(data, '\n'))
 }
 
+// writeScriptTempFile writes script to a temporary file and returns its path.
+// The caller is responsible for removing it with the returned cleanup function.
+func writeScriptTempFile(script string) (string, func(), error) {
+	f, err := os.CreateTemp("", "wf-script-*.sh")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create temp script: %w", err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", func() {}, fmt.Errorf("write temp script: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", func() {}, fmt.Errorf("close temp script: %w", err)
+	}
+	if err := os.Chmod(f.Name(), 0o700); err != nil {
+		os.Remove(f.Name())
+		return "", func() {}, fmt.Errorf("chmod temp script: %w", err)
+	}
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
+}
+
 // execAndStream starts cmd, streams its stdout+stderr to outputChan, waits for
 // completion, and returns the exit code.
 func execAndStream(ctx context.Context, cmd *exec.Cmd, outputChan chan<- string) (int, error) {
