@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -25,6 +26,114 @@ var version = "dev"
 var rootCmd = &cobra.Command{
 	Use:   "workflowfiesta-runner",
 	Short: "WorkflowFiesta self-hosted runner",
+}
+
+// ── ANSI helpers (no-bright variants so text is darker / more readable) ───────
+
+const (
+	ansiReset  = "\033[0m"
+	ansiBold   = "\033[1m"
+	ansiGray   = "\033[90m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiRed    = "\033[31m"
+	ansiCyan   = "\033[36m"
+)
+
+// darkFormatter formats logrus entries with dark, readable ANSI colors.
+type darkFormatter struct{}
+
+func (f *darkFormatter) Format(entry *log.Entry) ([]byte, error) {
+	ts := entry.Time.Format("15:04:05")
+	lvl := strings.ToUpper(entry.Level.String())
+	if len(lvl) > 4 {
+		lvl = lvl[:4]
+	}
+
+	var lvlColor, msgBold string
+	switch entry.Level {
+	case log.ErrorLevel, log.FatalLevel, log.PanicLevel:
+		lvlColor = ansiRed
+		msgBold = ansiBold
+	case log.WarnLevel:
+		lvlColor = ansiYellow
+	default:
+		lvlColor = ansiCyan
+	}
+
+	line := fmt.Sprintf("%s%s%s %s%s%s %s%s%s\n",
+		ansiGray, ts, ansiReset,
+		lvlColor, lvl, ansiReset,
+		msgBold, entry.Message, ansiReset,
+	)
+	return []byte(line), nil
+}
+
+// ── cliSink ────────────────────────────────────────────────────────────────────
+
+// cliSink is a StatusSink that prints ASCII banners for lifecycle events and
+// streams raw job output to stdout.
+type cliSink struct {
+	apiURL string
+	name   string
+}
+
+func (s *cliSink) SetConnected(connected bool) {
+	if connected {
+		fmt.Printf("\n%s●%s Connected  %s%s → %s%s\n\n",
+			ansiGreen, ansiReset, ansiGray, s.name, s.apiURL, ansiReset)
+	} else {
+		fmt.Printf("\n%s●%s Disconnected\n\n", ansiYellow, ansiReset)
+	}
+}
+
+func (s *cliSink) SetIdle() {
+	fmt.Printf("%s%s%s\n\n", ansiGray, strings.Repeat("─", 66), ansiReset)
+}
+
+func (s *cliSink) SetJobRunning(jobID, image, scriptBlurb string) {
+	w := 62 // inner content width
+	rule := strings.Repeat("─", w+2)
+
+	row := func(label, value string) string {
+		// label is padded to 8 chars; value fills remaining space
+		content := fmt.Sprintf("  %-8s %s", label+":", truncateCLI(value, w-11))
+		pad := w + 2 - len([]rune(content))
+		if pad < 0 {
+			pad = 0
+		}
+		return fmt.Sprintf("│%s%s│", content, strings.Repeat(" ", pad))
+	}
+
+	fmt.Printf("\n%s┌%s┐%s\n", ansiBold, rule, ansiReset)
+	fmt.Printf("%s│%s  ► JOB RECEIVED%-*s%s│%s\n",
+		ansiBold, ansiReset, w-13, "", ansiBold, ansiReset)
+	fmt.Printf("%s│%s  Source  : %-*s%s│%s\n",
+		ansiBold, ansiReset, w-12, truncateCLI(s.name+" @ "+s.apiURL, w-12), ansiBold, ansiReset)
+	fmt.Printf("%s├%s┤%s\n", ansiBold, rule, ansiReset)
+	fmt.Println(row("Job", jobID))
+	fmt.Println(row("Image", image))
+	fmt.Println(row("Script", scriptBlurb))
+	fmt.Printf("%s└%s┘%s\n\n", ansiBold, rule, ansiReset)
+}
+
+func (s *cliSink) SetJobComplete(_, _ string, exitCode int) {
+	if exitCode == 0 {
+		fmt.Printf("%s✓ passed%s\n", ansiGreen, ansiReset)
+	} else {
+		fmt.Printf("%s✗ failed (exit %d)%s\n", ansiRed, exitCode, ansiReset)
+	}
+}
+
+func (s *cliSink) AppendLog(chunk string) {
+	fmt.Fprint(os.Stdout, chunk)
+}
+
+func truncateCLI(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
 }
 
 var runCmd = &cobra.Command{
@@ -44,7 +153,6 @@ var runCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Handle signals
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
@@ -53,7 +161,7 @@ var runCmd = &cobra.Command{
 			cancel()
 		}()
 
-		r := runner.New(cfg)
+		r := runner.New(cfg).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
 		return r.Run(ctx)
 	},
 }
@@ -157,20 +265,26 @@ var runLocalCmd = &cobra.Command{
 		}()
 
 		if headless {
-			r := runner.New(cfg)
+			r := runner.New(cfg).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
 			return r.Run(ctx)
 		}
 
-		// GUI mode: runner runs in a goroutine; Fyne event loop runs on this (main) goroutine.
+		// GUI mode: open status window + system tray.
+		// The runner runs in a goroutine; Fyne event loop on main thread.
 		// macOS requires the GUI event loop on the main OS thread.
+		sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
+		// Show before a.Run() — must be a direct call, not via fyne.Do,
+		// because the Fyne event loop hasn't started yet.
+		sw.Show()
+
 		go func() {
-			if err := runner.New(cfg).Run(ctx); err != nil {
+			if err := runner.New(cfg).WithSink(sw).Run(ctx); err != nil {
 				log.Errorf("Runner stopped: %v", err)
 			}
 			localui.QuitApp()
 		}()
 
-		localui.StartTray(cfg.Name, cancel) // Blocks until app.Quit().
+		localui.StartTray(cfg.Name, cancel, sw) // Blocks until app.Quit().
 		return nil
 	},
 }
@@ -233,7 +347,37 @@ func init() {
 }
 
 func main() {
-	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
+	log.SetFormatter(&darkFormatter{})
+
+	// No arguments: user double-clicked the app. Skip the CLI entirely and
+	// go straight to the GUI launcher (first-run wizard or status window).
+	if len(os.Args) == 1 {
+		localui.RunAutoLaunch(localconfig.DefaultPath(), func(cfg *config.Config) {
+			ctx, cancel := context.WithCancel(context.Background())
+
+			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
+			sw.Show()
+
+			sigs := make(chan os.Signal, 1)
+			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				<-sigs
+				cancel()
+				localui.QuitApp()
+			}()
+
+			go func() {
+				if err := runner.New(cfg).WithSink(sw).Run(ctx); err != nil {
+					log.Errorf("Runner stopped: %v", err)
+				}
+				localui.QuitApp()
+			}()
+
+			localui.SetupTray(cfg.Name, cancel, sw)
+		})
+		return
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

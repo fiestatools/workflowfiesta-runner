@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"workflowfiesta-runner/internal/localconfig"
@@ -19,6 +20,39 @@ type Config struct {
 	KubeImagePullSecret string // KUBERNETES_IMAGE_PULL_SECRET
 	LocalConfigPath     string // path to runner.yaml (local executor only)
 	LocalConfig         *localconfig.LocalConfig // loaded local config (set by run-local)
+}
+
+// CredentialsFilePath returns the path to the auto-saved credentials file.
+func CredentialsFilePath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".workflowfiesta", "credentials.env")
+}
+
+// applyCredentialsFile reads ~/.workflowfiesta/credentials.env (written by the
+// GUI registration wizard) and fills in any fields not already set via env vars.
+func applyCredentialsFile(cfg *Config) {
+	data, err := os.ReadFile(CredentialsFilePath())
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "export ")
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) != 2 || kv[1] == "" {
+			continue
+		}
+		switch kv[0] {
+		case "WORKFLOWFIESTA_API_URL":
+			cfg.APIURL = kv[1]
+		case "WORKFLOWFIESTA_TOKEN":
+			cfg.Token = kv[1]
+		case "WORKFLOWFIESTA_RUNNER_ID":
+			cfg.RunnerID = kv[1]
+		case "WORKFLOWFIESTA_RUNNER_NAME":
+			cfg.Name = kv[1]
+		}
+	}
 }
 
 func Load() *Config {
@@ -52,7 +86,7 @@ func Load() *Config {
 		localConfigPath = localconfig.DefaultPath()
 	}
 
-	return &Config{
+	cfg := &Config{
 		APIURL:              getEnv("WORKFLOWFIESTA_API_URL", "http://localhost:3001"),
 		Token:               os.Getenv("WORKFLOWFIESTA_TOKEN"),
 		RunnerID:            os.Getenv("WORKFLOWFIESTA_RUNNER_ID"),
@@ -64,6 +98,13 @@ func Load() *Config {
 		KubeImagePullSecret: os.Getenv("KUBERNETES_IMAGE_PULL_SECRET"),
 		LocalConfigPath:     localConfigPath,
 	}
+
+	// Fall back to the saved credentials file if no token was found in env vars.
+	if cfg.Token == "" {
+		applyCredentialsFile(cfg)
+	}
+
+	return cfg
 }
 
 func getEnv(key, defaultVal string) string {

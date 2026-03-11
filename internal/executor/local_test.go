@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -408,6 +409,66 @@ func TestExecute_AuditLog_Written(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "audit-test") {
 		t.Errorf("audit log should contain job_id: %s", data)
+	}
+}
+
+func TestWriteScriptTempFile_CreatesExecutableFile(t *testing.T) {
+	script := "echo hello"
+	path, cleanup, err := writeScriptTempFile(script)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer cleanup()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("file not readable: %v", err)
+	}
+	if string(data) != script {
+		t.Errorf("expected %q, got %q", script, string(data))
+	}
+	info, _ := os.Stat(path)
+	if info.Mode()&0o100 == 0 {
+		t.Error("file should be executable")
+	}
+
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("cleanup should remove the file")
+	}
+}
+
+func TestExecute_HeredocScript(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not available")
+	}
+	e := testExecutor(func(c *localconfig.LocalConfig) {
+		c.Confirm = "never"
+	})
+	out := make(chan string, 100)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	code, err := e.Execute(ctx, Input{
+		JobID:      "heredoc-test",
+		Script:     "python3 << 'EOF'\nprint('heredoc works')\nEOF\n",
+		Timeout:    10 * time.Second,
+		OutputChan: out,
+	})
+	close(out)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	var combined string
+	for line := range out {
+		combined += line
+	}
+	if !strings.Contains(combined, "heredoc works") {
+		t.Errorf("expected output to contain 'heredoc works', got: %q", combined)
 	}
 }
 

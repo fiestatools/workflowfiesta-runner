@@ -4,10 +4,12 @@ package localui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
@@ -16,7 +18,7 @@ import (
 	"workflowfiesta-runner/internal/localconfig"
 )
 
-// RunWizard opens the first-run setup wizard.  It blocks until the user
+// RunWizard opens the first-run setup wizard. It blocks until the user
 // completes or cancels the wizard, writing the resulting config to configPath.
 func RunWizard(configPath string) error {
 	if !hasDisplay() {
@@ -25,36 +27,79 @@ func RunWizard(configPath string) error {
 
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta · Setup")
-	win.Resize(fyne.NewSize(500, 400))
+	win.Resize(fyne.NewSize(500, 440))
 	win.CenterOnScreen()
 
 	cfg := localconfig.Default()
 	var saveErr error
-
-	// --- Step state ---
 	var currentStep int
-	var stepContainers [4]fyne.CanvasObject
 
-	// Back/Next/Finish buttons.
-	backBtn := widget.NewButton("← Back", nil)
-	nextBtn := widget.NewButton("Next →", nil)
-	finishBtn := widget.NewButton("Save & Start", nil)
-	backBtn.Hide()
-	finishBtn.Hide()
+	const numSteps = 4
 
-	stepIndicator := widget.NewLabel("Step 1 of 4")
+	// ── progress dots ────────────────────────────────────────────────────────
+	dots := make([]*canvas.Rectangle, numSteps)
+	for i := range dots {
+		r := canvas.NewRectangle(colorBorder)
+		r.CornerRadius = 4
+		dots[i] = r
+	}
+	refreshDots := func(active int) {
+		for i, d := range dots {
+			switch {
+			case i < active:
+				d.FillColor = colorSuccess
+			case i == active:
+				d.FillColor = color.NRGBA{R: 59, G: 130, B: 246, A: 255}
+			default:
+				d.FillColor = colorBorder
+			}
+			d.Refresh()
+		}
+	}
 
-	contentHolder := container.NewStack()
+	dotCells := make([]fyne.CanvasObject, numSteps)
+	makeDotCells := func(active int) {
+		for i, d := range dots {
+			sz := fyne.NewSize(8, 8)
+			if i == active {
+				sz = fyne.NewSize(24, 8)
+			}
+			dotCells[i] = container.New(layout.NewGridWrapLayout(sz), d)
+		}
+	}
+	makeDotCells(0)
+	dotsRow := container.NewHBox(dotCells...)
 
-	navRow := container.NewHBox(backBtn, layout.NewSpacer(), stepIndicator, layout.NewSpacer(), nextBtn, finishBtn)
-	root := container.NewBorder(nil, navRow, nil, nil, contentHolder)
-	win.SetContent(root)
+	// ── nav ──────────────────────────────────────────────────────────────────
+	stepLabel := canvas.NewText("Step 1 of 4", colorLabel)
+	stepLabel.TextSize = 11
+
+	backBtn := newButton("← Back", nil)
+	nextBtn := newButton("Next →", nil)
+	finishBtn := newButton("Save & Start", nil)
+	finishBtn.Importance = widget.HighImportance
+
+	navRow := container.NewHBox(
+		container.NewWithoutLayout(stepLabel),
+		layout.NewSpacer(),
+		backBtn, nextBtn, finishBtn,
+	)
+
+	bodyHolder := container.NewStack()
+	var stepContainers [numSteps]fyne.CanvasObject
 
 	showStep := func(n int) {
 		currentStep = n
-		stepIndicator.SetText(fmt.Sprintf("Step %d of 4", n+1))
-		contentHolder.Objects = []fyne.CanvasObject{stepContainers[n]}
-		contentHolder.Refresh()
+		stepLabel.Text = fmt.Sprintf("Step %d of 4", n+1)
+		stepLabel.Refresh()
+		refreshDots(n)
+		makeDotCells(n)
+		objs := make([]fyne.CanvasObject, numSteps)
+		copy(objs, dotCells)
+		dotsRow.Objects = objs
+		dotsRow.Refresh()
+		bodyHolder.Objects = []fyne.CanvasObject{stepContainers[n]}
+		bodyHolder.Refresh()
 		backBtn.Hidden = (n == 0)
 		nextBtn.Hidden = (n == 3)
 		finishBtn.Hidden = (n != 3)
@@ -63,13 +108,13 @@ func RunWizard(configPath string) error {
 		finishBtn.Refresh()
 	}
 
-	// ---- Step 1: Folder picker ----
+	// ── Step 1: Folder access ─────────────────────────────────────────────────
 	pathsEntry := widget.NewMultiLineEntry()
 	pathsEntry.SetPlaceHolder("One path per line, e.g.\n~/projects\n~/Documents:ro")
 	pathsEntry.SetText("~/")
 	pathsEntry.SetMinRowsVisible(4)
 
-	browseBtn := widget.NewButton("Browse…", func() {
+	browseBtn := newButton("Browse…", func() {
 		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
 			if err != nil || uri == nil {
 				return
@@ -82,14 +127,16 @@ func RunWizard(configPath string) error {
 		}, win)
 	})
 
+	pathHint := canvas.NewText("Append  :ro  for read-only access", colorLabel)
+	pathHint.TextSize = 11
+
 	stepContainers[0] = container.NewVBox(
-		widget.NewLabelWithStyle("Which folders can the agent access?", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("The agent will only be able to read and write files in these folders.\nAppend :ro for read-only access."),
+		makeStepHeading("Folder Access", "Which folders can scripts read and write?"),
 		pathsEntry,
-		browseBtn,
+		container.NewHBox(browseBtn, container.NewWithoutLayout(pathHint)),
 	)
 
-	// ---- Step 2: Confirm mode ----
+	// ── Step 2: Approval mode ─────────────────────────────────────────────────
 	confirmRadio := widget.NewRadioGroup(
 		[]string{"Always (prompt for every job)", "Risky operations only (recommended)", "Never (auto-approve all jobs)"},
 		nil,
@@ -97,40 +144,44 @@ func RunWizard(configPath string) error {
 	confirmRadio.SetSelected("Risky operations only (recommended)")
 
 	stepContainers[1] = container.NewVBox(
-		widget.NewLabelWithStyle("When should you be asked to approve a job?", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		makeStepHeading("Approval Prompt", "When should you be asked to review a job before it runs?"),
 		confirmRadio,
 	)
 
-	// ---- Step 3: Network ----
+	// ── Step 3: Network ───────────────────────────────────────────────────────
 	networkRadio := widget.NewRadioGroup(
-		[]string{"Allow all (recommended for most users)", "Local only (localhost / LAN)", "Block all outbound network"},
+		[]string{"Allow all (recommended)", "Local only (localhost / LAN)", "Block all outbound network"},
 		nil,
 	)
-	networkRadio.SetSelected("Allow all (recommended for most users)")
+	networkRadio.SetSelected("Allow all (recommended)")
 
 	stepContainers[2] = container.NewVBox(
-		widget.NewLabelWithStyle("Network access for scripts", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("Controls whether scripts run by the agent can make network requests."),
+		makeStepHeading("Network Access", "Controls whether scripts can make outbound network requests."),
 		networkRadio,
 	)
 
-	// ---- Step 4: Summary ----
+	// ── Step 4: Summary ───────────────────────────────────────────────────────
 	summaryLabel := widget.NewLabel("")
 	summaryLabel.Wrapping = fyne.TextWrapWord
+	summaryBg := canvas.NewRectangle(colorCard)
+	summaryBg.CornerRadius = 4
+	summaryBg.StrokeColor = colorBorder
+	summaryBg.StrokeWidth = 1
+	summaryBlock := container.NewStack(summaryBg, container.NewPadded(summaryLabel))
+
 	stepContainers[3] = container.NewVBox(
-		widget.NewLabelWithStyle("Review your settings", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		summaryLabel,
-		widget.NewLabel("Click \"Save & Start\" to write the config and launch the runner."),
+		makeStepHeading("Review Settings", "Click Save & Start to write the config and launch the runner."),
+		summaryBlock,
 	)
 
 	updateSummary := func() {
 		summaryLabel.SetText(fmt.Sprintf(
-			"Allowed paths:\n%s\n\nApproval: %s\nNetwork: %s",
+			"Allowed paths:\n%s\n\nApproval:  %s\nNetwork:   %s",
 			pathsEntry.Text, confirmRadio.Selected, networkRadio.Selected,
 		))
 	}
 
-	// Wire navigation.
+	// ── wiring ────────────────────────────────────────────────────────────────
 	nextBtn.OnTapped = func() {
 		if currentStep == 2 {
 			updateSummary()
@@ -142,7 +193,6 @@ func RunWizard(configPath string) error {
 	}
 
 	finishBtn.OnTapped = func() {
-		// Parse paths.
 		var paths []string
 		for _, line := range splitLines(pathsEntry.Text) {
 			if line != "" {
@@ -184,9 +234,25 @@ func RunWizard(configPath string) error {
 		win.Close()
 	}
 
-	showStep(0)
-	win.ShowAndRun() // Starts the Fyne event loop; quits when the window closes.
+	// ── chrome ────────────────────────────────────────────────────────────────
+	headerBg := canvas.NewRectangle(colorCard)
+	headerBg.StrokeColor = colorBorder
+	headerBg.StrokeWidth = 1
+	dotsHeader := container.NewStack(headerBg, container.NewPadded(
+		container.NewHBox(dotsRow, layout.NewSpacer(), container.NewWithoutLayout(stepLabel)),
+	))
 
+	navBg := canvas.NewRectangle(colorCard)
+	navBg.StrokeColor = colorBorder
+	navBg.StrokeWidth = 1
+	navArea := container.NewStack(navBg, container.NewPadded(navRow))
+
+	win.SetContent(container.NewBorder(dotsHeader, navArea, nil, nil,
+		container.NewPadded(bodyHolder),
+	))
+
+	showStep(0)
+	win.ShowAndRun()
 	return saveErr
 }
 

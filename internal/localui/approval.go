@@ -15,12 +15,11 @@ import (
 )
 
 // approvalState manages the result channel for a single approval request.
-// It is kept as a struct so tests can inject decisions without needing a display.
 type approvalState struct {
 	resultCh chan bool
 	once     sync.Once
-	allowBtn *widget.Button
-	denyBtn  *widget.Button
+	allowBtn *cursorButton
+	denyBtn  *cursorButton
 	stopTick func()
 }
 
@@ -39,48 +38,89 @@ func (s *approvalState) decide(approved bool) {
 func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window {
 	win := a.NewWindow("WorkflowFiesta · Job Request")
 	win.SetFixedSize(true)
-	win.Resize(fyne.NewSize(440, 200))
+	win.Resize(fyne.NewSize(460, 280))
+
+	// ── header ──────────────────────────────────────────────────────────────
+	iconBg := canvas.NewRectangle(colorAmberDim)
+	iconBg.CornerRadius = 4
+	iconBg.StrokeColor = colorAmber
+	iconBg.StrokeWidth = 1
+	iconGlyph := canvas.NewText("⚠", colorAmber)
+	iconGlyph.TextSize = 16
+	iconCell := container.NewStack(
+		container.New(layout.NewGridWrapLayout(fyne.NewSize(32, 32)), iconBg),
+		container.NewCenter(iconGlyph),
+	)
+
+	titleText := canvas.NewText("Job Approval Required", colorText)
+	titleText.TextSize = 13
+	titleText.TextStyle = fyne.TextStyle{Bold: true}
+	subText := canvas.NewText("Review the script before allowing execution", colorMuted)
+	subText.TextSize = 11
+
+	headerRow := container.NewHBox(
+		iconCell,
+		container.NewVBox(
+			container.NewWithoutLayout(titleText),
+			container.NewWithoutLayout(subText),
+		),
+	)
+	headerBg := canvas.NewRectangle(colorCard)
+	headerBg.StrokeColor = colorBorder
+	headerBg.StrokeWidth = 1
+	header := container.NewStack(headerBg, container.NewPadded(headerRow))
+
+	// ── body ────────────────────────────────────────────────────────────────
+	fromText := canvas.NewText("From workflow on  "+req.RunnerName, colorMuted)
+	fromText.TextSize = 11
 
 	scriptText := truncateScript(req.Script, 10)
 	scriptLabel := widget.NewLabelWithStyle(scriptText, fyne.TextAlignLeading, fyne.TextStyle{Monospace: true})
 	scriptLabel.Wrapping = fyne.TextWrapWord
+	scriptBg := canvas.NewRectangle(colorTermBg)
+	scriptBg.CornerRadius = 4
+	scriptBg.StrokeColor = colorBorder
+	scriptBg.StrokeWidth = 1
+	scriptScroll := container.NewVScroll(scriptLabel)
+	scriptScroll.SetMinSize(fyne.NewSize(420, 90))
+	scriptBlock := container.NewStack(scriptBg, container.NewPadded(scriptScroll))
 
-	fromLabel := widget.NewLabel("From: " + req.RunnerName)
-	fromLabel.TextStyle = fyne.TextStyle{Italic: true}
+	countdownLabel := canvas.NewText(fmt.Sprintf("Auto-deny in  %ds", int(req.Timeout.Seconds())), colorMuted)
+	countdownLabel.TextSize = 11
 
 	progress := widget.NewProgressBar()
 	progress.Min = 0
 	progress.Max = float64(req.Timeout)
 	progress.Value = float64(req.Timeout)
-	countdownLabel := widget.NewLabel(fmt.Sprintf("Auto-deny in %ds", int(req.Timeout.Seconds())))
 
-	s.denyBtn = widget.NewButton("  Deny  ", func() {
-		s.decide(false)
-		win.Close()
-	})
-	s.allowBtn = widget.NewButton("  Allow  ", func() {
-		s.decide(true)
-		win.Close()
-	})
-
-	allowBg := canvas.NewRectangle(approveGreen)
-	allowBg.CornerRadius = 4
-	allowContainer := container.NewStack(allowBg, s.allowBtn)
-
-	btnRow := container.NewHBox(layout.NewSpacer(), s.denyBtn, allowContainer)
-	content := container.NewVBox(
-		scriptLabel,
+	body := container.NewPadded(container.NewVBox(
+		container.NewWithoutLayout(fromText),
 		widget.NewSeparator(),
-		fromLabel,
-		widget.NewSeparator(),
-		countdownLabel,
+		scriptBlock,
+		container.NewWithoutLayout(countdownLabel),
 		progress,
-		btnRow,
-	)
-	win.SetContent(container.NewPadded(content))
+	))
+
+	// ── footer buttons ───────────────────────────────────────────────────────
+	s.denyBtn = newButton("✕  Deny", func() {
+		s.decide(false)
+	})
+
+	s.allowBtn = newButton("✓  Allow", func() {
+		s.decide(true)
+	})
+	s.allowBtn.Importance = widget.SuccessImportance
+
+	footerBg := canvas.NewRectangle(colorCard)
+	footerBg.StrokeColor = colorBorder
+	footerBg.StrokeWidth = 1
+	footerRow := container.NewHBox(layout.NewSpacer(), s.denyBtn, s.allowBtn)
+	footer := container.NewStack(footerBg, container.NewPadded(footerRow))
+
+	win.SetContent(container.NewVBox(header, body, footer))
 	win.SetOnClosed(func() { s.decide(false) })
 
-	// Countdown ticker — stopped via s.stopTick().
+	// ── countdown ticker ─────────────────────────────────────────────────────
 	stopped := make(chan struct{})
 	s.stopTick = sync.OnceFunc(func() { close(stopped) })
 
@@ -99,8 +139,11 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 					win.Close()
 					return
 				}
-				countdownLabel.SetText(fmt.Sprintf("Auto-deny in %ds", remaining))
-				progress.SetValue(float64(remaining))
+				fyne.Do(func() {
+					countdownLabel.Text = fmt.Sprintf("Auto-deny in  %ds", remaining)
+					countdownLabel.Refresh()
+					progress.SetValue(float64(remaining))
+				})
 			}
 		}
 	}()

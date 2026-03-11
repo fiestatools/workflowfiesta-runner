@@ -13,10 +13,20 @@ import (
 	"workflowfiesta-runner/internal/executor"
 )
 
+// StatusSink receives runner lifecycle events for display in a UI or CLI.
+type StatusSink interface {
+	SetConnected(connected bool)
+	SetIdle()
+	SetJobRunning(jobID, image, scriptBlurb string)
+	SetJobComplete(jobID, image string, exitCode int)
+	AppendLog(line string)
+}
+
 type Runner struct {
 	cfg      *config.Config
 	client   *api.Client
 	executor executor.Executor
+	sinks    []StatusSink
 }
 
 func New(cfg *config.Config) *Runner {
@@ -28,9 +38,23 @@ func New(cfg *config.Config) *Runner {
 	}
 }
 
+// WithSink adds a StatusSink that receives lifecycle events from this runner.
+// Multiple sinks can be added; events are fanned out to all of them.
+func (r *Runner) WithSink(sink StatusSink) *Runner {
+	r.sinks = append(r.sinks, sink)
+	return r
+}
+
+func (r *Runner) notify(fn func(StatusSink)) {
+	for _, s := range r.sinks {
+		fn(s)
+	}
+}
+
 func (r *Runner) Run(ctx context.Context) error {
 	// Connect with retry
 	r.client.ConnectWithRetry(ctx)
+	r.notify(func(s StatusSink) { s.SetConnected(true) })
 
 	// Start heartbeat goroutine
 	go r.heartbeatLoop(ctx)
@@ -48,6 +72,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			wg.Wait()
 			r.client.Close()
+			r.notify(func(s StatusSink) { s.SetConnected(false) })
 			return ctx.Err()
 		case job := <-jobChan:
 			wg.Add(1)
@@ -59,8 +84,26 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
+func scriptBlurb(script string) string {
+	// Return first non-empty line, capped at 80 chars.
+	for _, line := range strings.Split(script, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if len(line) > 80 {
+			return line[:77] + "…"
+		}
+		return line
+	}
+	return script
+}
+
 func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	log.Infof("Starting job %s (image: %s)", job.JobID, job.DockerImage)
+
+	blurb := scriptBlurb(job.Script)
+	r.notify(func(s StatusSink) { s.SetJobRunning(job.JobID, job.DockerImage, blurb) })
 
 	if err := r.client.ReportJobClaimed(job.JobID); err != nil {
 		log.Warnf("Failed to claim job %s: %v", job.JobID, err)
@@ -81,6 +124,7 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		for chunk := range outputChan {
 			outputBuilder.WriteString(chunk)
 			r.client.StreamOutput(job.JobID, chunk)
+			r.notify(func(s StatusSink) { s.AppendLog(chunk) })
 		}
 	}()
 
@@ -98,12 +142,19 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	if err != nil {
 		log.Errorf("Job %s failed: %v", job.JobID, err)
 		r.client.ReportJobFailed(job.JobID, err.Error())
+		r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, 1) })
+		r.notify(func(s StatusSink) {
+			s.AppendLog("[error] " + err.Error() + "\n")
+			s.SetIdle()
+		})
 		return
 	}
 
 	output := outputBuilder.String()
 	log.Infof("Job %s completed with exit code %d", job.JobID, exitCode)
 	r.client.ReportJobComplete(job.JobID, exitCode, output)
+	r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, exitCode) })
+	r.notify(func(s StatusSink) { s.SetIdle() })
 }
 
 func (r *Runner) heartbeatLoop(ctx context.Context) {

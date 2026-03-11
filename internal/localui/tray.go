@@ -3,73 +3,96 @@
 package localui
 
 import (
+	"bytes"
+	"image"
 	"image/color"
+	"image/png"
 	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/theme"
 )
-
-// approveGreen is the colour used for the Allow button background.
-var approveGreen = color.NRGBA{R: 52, G: 168, B: 83, A: 255}
 
 var (
 	fyneOnce   sync.Once
 	fyneApp    fyne.App
-	appFactory = func() fyne.App { return app.New() } // overridden by tests
+	appFactory = func() fyne.App { return app.NewWithID("com.workflowfiesta.runner") } // overridden by tests
 )
 
 // getApp returns the process-wide fyne.App, creating it on first call.
 func getApp() fyne.App {
-	fyneOnce.Do(func() { fyneApp = appFactory() })
+	fyneOnce.Do(func() {
+		fyneApp = appFactory()
+		fyneApp.Settings().SetTheme(theme.DarkTheme())
+	})
 	return fyneApp
 }
 
 // QuitApp stops the Fyne event loop.
 func QuitApp() {
 	if fyneApp != nil {
-		fyneApp.Quit()
+		fyne.Do(func() { fyneApp.Quit() })
 	}
 }
 
-// StartTray sets up the system tray icon and starts the Fyne event loop.
-// Blocks until the event loop exits. onStop is called on "Stop Runner".
-func StartTray(runnerName string, onStop func()) {
+// SetupTray configures the system tray icon and menu without starting the event
+// loop. Call this before a.Run() when you need to manage the loop yourself.
+func SetupTray(runnerName string, onStop func(), sw *StatusWindow) {
 	a := getApp()
 	if desk, ok := a.(desktop.App); ok {
-		menu := fyne.NewMenu("WorkflowFiesta",
-			fyne.NewMenuItem(runnerName+" · running", nil),
+		var showItem *fyne.MenuItem
+		if sw != nil {
+			showItem = fyne.NewMenuItem("Open Status Window", func() { sw.Show() })
+		}
+		items := []*fyne.MenuItem{
+			fyne.NewMenuItem("WorkflowFiesta Runner · running", nil),
+			fyne.NewMenuItemSeparator(),
+		}
+		if showItem != nil {
+			items = append(items, showItem)
+		}
+		items = append(items,
 			fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem("Stop Runner", func() {
 				if onStop != nil {
 					onStop()
 				}
 			}),
-			fyne.NewMenuItemSeparator(),
-			fyne.NewMenuItem("Quit", func() { a.Quit() }),
+			fyne.NewMenuItem("Quit WorkflowFiesta Runner", func() { a.Quit() }),
 		)
+		menu := fyne.NewMenu("WorkflowFiesta", items...)
 		desk.SetSystemTrayMenu(menu)
 		desk.SetSystemTrayIcon(runnerIcon())
 	}
-	a.Run()
+}
+
+// StartTray sets up the system tray icon and starts the Fyne event loop.
+// Blocks until the event loop exits. onStop is called on "Stop Runner".
+// sw is the StatusWindow to show/re-open from the tray menu; may be nil.
+func StartTray(runnerName string, onStop func(), sw *StatusWindow) {
+	SetupTray(runnerName, onStop, sw)
+	getApp().Run()
 }
 
 func runnerIcon() fyne.Resource {
 	return fyne.NewStaticResource("runner-icon.png", defaultIconPNG)
 }
 
-// defaultIconPNG is a minimal 16×16 green square PNG.
-var defaultIconPNG = []byte{
-	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-	0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10,
-	0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x91, 0x68,
-	0x36, 0x00, 0x00, 0x00, 0x18, 0x49, 0x44, 0x41,
-	0x54, 0x78, 0x9c, 0x62, 0x34, 0xa8, 0x53, 0xfc,
-	0xff, 0xff, 0x3f, 0x03, 0x03, 0x03, 0x00, 0x00,
-	0x00, 0xff, 0xff, 0x03, 0x00, 0x03, 0x6d, 0x01,
-	0x2e, 0xb4, 0x3f, 0xf7, 0xa2, 0x00, 0x00, 0x00,
-	0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60,
-	0x82,
+// defaultIconPNG is a valid 16×16 green square PNG, generated at init time.
+var defaultIconPNG []byte
+
+func init() {
+	img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	green := color.NRGBA{R: 52, G: 168, B: 83, A: 255}
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			img.Set(x, y, green)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err == nil {
+		defaultIconPNG = buf.Bytes()
+	}
 }

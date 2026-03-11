@@ -20,6 +20,10 @@ type LocalConfig struct {
 	Sandbox         string   `yaml:"sandbox"`          // "none", "kernel"
 	AuditLog        string   `yaml:"audit_log"`        // path
 
+	// EnvironmentID is the UUID of an existing environment to associate this runner with.
+	// If empty, the server auto-creates a new environment on registration.
+	EnvironmentID string `yaml:"environment_id,omitempty"`
+
 	// Runtime-only fields — not persisted to YAML.
 	Headless   bool   `yaml:"-"`
 	RunnerName string `yaml:"-"`
