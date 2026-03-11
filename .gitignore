@@ -1,0 +1,20 @@
+# Build outputs
+workflowfiesta-runner
+workflowfiesta-runner-gui
+workflowfiesta-runner-*
+runner
+runner.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
