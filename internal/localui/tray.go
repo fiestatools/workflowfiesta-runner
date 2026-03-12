@@ -3,10 +3,6 @@
 package localui
 
 import (
-	"bytes"
-	"image"
-	"image/color"
-	"image/png"
 	"sync"
 
 	"fyne.io/fyne/v2"
@@ -27,7 +23,8 @@ var (
 func getApp() fyne.App {
 	fyneOnce.Do(func() {
 		fyneApp = appFactory()
-		fyneApp.Settings().SetTheme(theme.DarkTheme())
+		fyneApp.Settings().SetTheme(wfTheme{base: theme.DarkTheme()})
+		fyneApp.SetIcon(LogoResource())
 	})
 	return fyneApp
 }
@@ -89,22 +86,5 @@ func StartTray(runnerName string, onStop func(), sw *StatusWindow, cfg *localcon
 }
 
 func runnerIcon() fyne.Resource {
-	return fyne.NewStaticResource("runner-icon.png", defaultIconPNG)
-}
-
-// defaultIconPNG is a valid 16×16 green square PNG, generated at init time.
-var defaultIconPNG []byte
-
-func init() {
-	img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
-	green := color.NRGBA{R: 52, G: 168, B: 83, A: 255}
-	for y := 0; y < 16; y++ {
-		for x := 0; x < 16; x++ {
-			img.Set(x, y, green)
-		}
-	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err == nil {
-		defaultIconPNG = buf.Bytes()
-	}
+	return LogoResource()
 }

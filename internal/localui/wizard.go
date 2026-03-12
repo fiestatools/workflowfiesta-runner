@@ -49,7 +49,7 @@ func RunWizard(configPath string) error {
 			case i < active:
 				d.FillColor = colorSuccess
 			case i == active:
-				d.FillColor = color.NRGBA{R: 59, G: 130, B: 246, A: 255}
+				d.FillColor = color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 0xFF}
 			default:
 				d.FillColor = colorBorder
 			}

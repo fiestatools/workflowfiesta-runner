@@ -116,13 +116,6 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta Runner")
 	win.SetCloseIntercept(func() {
-		// Show a one-time hint explaining background behaviour.
-		// After the user dismisses it once, subsequent X clicks just hide.
-		if a.Preferences().Bool("close-hint-shown") {
-			win.Hide()
-			return
-		}
-
 		icon := canvas.NewText("●", colorSuccess)
 		icon.TextSize = 16
 
@@ -143,7 +136,6 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 			"Quit Runner",
 			content,
 			func(keepRunning bool) {
-				a.Preferences().SetBool("close-hint-shown", true)
 				if keepRunning {
 					win.Hide()
 				} else {
@@ -205,19 +197,10 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 // ── section builders ──────────────────────────────────────────────────────────
 
 func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
-	// Icon cell — colored rectangle bar (no emoji, Fyne font lacks glyphs)
-	iconBg := canvas.NewRectangle(colorPrimaryDim)
-	iconBg.CornerRadius = 4
-	iconBg.StrokeColor = color.NRGBA{R: 59, G: 130, B: 246, A: 60}
-	iconBg.StrokeWidth = 1
-	iconBar := canvas.NewRectangle(color.NRGBA{R: 59, G: 130, B: 246, A: 200})
-	iconBar.CornerRadius = 2
-	iconCell := container.NewStack(
-		container.New(layout.NewGridWrapLayout(fyne.NewSize(38, 38)), iconBg),
-		container.NewCenter(
-			container.New(layout.NewGridWrapLayout(fyne.NewSize(14, 14)), iconBar),
-		),
-	)
+	// Icon cell — WorkflowFiesta logo
+	logoImg := canvas.NewImageFromResource(LogoResource())
+	logoImg.FillMode = canvas.ImageFillContain
+	iconCell := container.New(layout.NewGridWrapLayout(fyne.NewSize(38, 38)), logoImg)
 
 	// Name + host
 	nameLabel := canvas.NewText(sw.runnerName, colorText)
@@ -387,9 +370,9 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 }
 
 func (sw *StatusWindow) buildCTABanner() fyne.CanvasObject {
-	colorCTABg     := color.NRGBA{R: 37, G: 99, B: 235, A: 255}  // blue-600
-	colorCTABgDim  := color.NRGBA{R: 37, G: 99, B: 235, A: 25}
-	colorCTABorder := color.NRGBA{R: 96, G: 165, B: 250, A: 80}  // blue-400
+	colorCTABg     := color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 255} // brand orange
+	colorCTABgDim  := color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 25}
+	colorCTABorder := color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 80}
 
 	// Icon — lightning bolt indicator
 	iconBar := canvas.NewRectangle(colorCTABg)
@@ -404,11 +387,11 @@ func (sw *StatusWindow) buildCTABanner() fyne.CanvasObject {
 	)
 
 	// Text
-	headline := canvas.NewText("Your runner is live!", color.NRGBA{R: 219, G: 234, B: 254, A: 255}) // blue-100
+	headline := canvas.NewText("Your runner is live!", color.NRGBA{R: 0xFF, G: 0xE0, B: 0xC8, A: 255})
 	headline.TextSize = 13
 	headline.TextStyle = fyne.TextStyle{Bold: true}
 
-	subline := canvas.NewText("Your agent can now read and interact with data on this computer.", color.NRGBA{R: 147, G: 197, B: 253, A: 255}) // blue-300
+	subline := canvas.NewText("Your agent can now read and interact with data on this computer.", color.NRGBA{R: 0xF9, G: 0xBC, B: 0x8F, A: 255})
 	subline.TextSize = 11
 
 	textCol := container.NewVBox(
