@@ -27,6 +27,13 @@ func NewTestApprovalWindow(req ApprovalRequest) (win fyne.Window, allow, deny *w
 	return w, &s.allowBtn.Button, &s.denyBtn.Button, s.resultCh
 }
 
+// NewTestApprovalWindowFull creates an approval window and returns all four button refs.
+func NewTestApprovalWindowFull(req ApprovalRequest) (win fyne.Window, allow, deny, allowSession, alwaysAllow *widget.Button, resultCh <-chan ApprovalResult) {
+	s := newApprovalState()
+	w := s.buildWindow(req, getApp())
+	return w, &s.allowBtn.Button, &s.denyBtn.Button, &s.allowSessionBtn.Button, &s.alwaysAllowBtn.Button, s.resultCh
+}
+
 // RegisterAPI is the internal callRegisterAPI — exposed so tests can mock the
 // HTTP layer by pointing at a test server.
 var RegisterAPI = callRegisterAPI

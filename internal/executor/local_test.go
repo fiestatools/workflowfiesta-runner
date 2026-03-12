@@ -472,6 +472,141 @@ func TestExecute_HeredocScript(t *testing.T) {
 	}
 }
 
+// ── scriptFingerprint ─────────────────────────────────────────────────────────
+
+func TestScriptFingerprint_DeterministicAndUnique(t *testing.T) {
+	// Same script → same fingerprint
+	fp1 := scriptFingerprint("ls -la")
+	fp2 := scriptFingerprint("ls -la")
+	if fp1 != fp2 {
+		t.Error("fingerprint should be deterministic")
+	}
+	// Different script → different fingerprint
+	fp3 := scriptFingerprint("rm -rf /tmp/test")
+	if fp1 == fp3 {
+		t.Error("different scripts should produce different fingerprints")
+	}
+	// Whitespace not trimmed by scriptFingerprint itself (it hashes raw bytes)
+	fp4 := scriptFingerprint("ls -la")
+	if fp1 != fp4 {
+		t.Error("same content should produce same fingerprint")
+	}
+}
+
+func TestScriptFingerprint_EmptyString(t *testing.T) {
+	fp := scriptFingerprint("")
+	if fp == "" {
+		t.Error("fingerprint of empty string should not be empty")
+	}
+	// Should be a valid hex SHA-256 (64 chars)
+	if len(fp) != 64 {
+		t.Errorf("expected 64-char hex fingerprint, got %d chars: %q", len(fp), fp)
+	}
+}
+
+func TestScriptFingerprint_DifferentWhitespace(t *testing.T) {
+	fp1 := scriptFingerprint("ls -la")
+	fp2 := scriptFingerprint("  ls -la  \n")
+	// scriptFingerprint hashes raw input, so whitespace differences produce different hashes
+	if fp1 == fp2 {
+		t.Log("note: fingerprint does NOT trim whitespace (hashes raw input)")
+	}
+}
+
+// ── isSessionAllowed / isAlwaysAllowed ────────────────────────────────────────
+
+func TestIsSessionAllowed_AfterAddingFingerprint(t *testing.T) {
+	e := testExecutor()
+	script := "ls ~/Documents"
+	if e.isSessionAllowed(script) {
+		t.Fatal("should not be session-allowed before adding")
+	}
+	fp := scriptFingerprint(script)
+	e.mu.Lock()
+	e.sessionAllows = append(e.sessionAllows, fp)
+	e.mu.Unlock()
+	if !e.isSessionAllowed(script) {
+		t.Error("should be session-allowed after adding fingerprint")
+	}
+}
+
+func TestIsAlwaysAllowed_AfterAddingToConfig(t *testing.T) {
+	e := testExecutor()
+	script := "cat README.md"
+	if e.isAlwaysAllowed(script) {
+		t.Fatal("should not be always-allowed before adding")
+	}
+	fp := scriptFingerprint(script)
+	e.localCfg.AlwaysAllowedPatterns = append(e.localCfg.AlwaysAllowedPatterns, fp)
+	if !e.isAlwaysAllowed(script) {
+		t.Error("should be always-allowed after adding fingerprint to config")
+	}
+}
+
+func TestIsSessionAllowed_DoesNotMatchDifferentScript(t *testing.T) {
+	e := testExecutor()
+	fp := scriptFingerprint("ls ~/Documents")
+	e.mu.Lock()
+	e.sessionAllows = append(e.sessionAllows, fp)
+	e.mu.Unlock()
+	if e.isSessionAllowed("ls ~/Desktop") {
+		t.Error("different script should not be session-allowed")
+	}
+}
+
+// ── mockReporter ──────────────────────────────────────────────────────────────
+
+type mockReporter struct {
+	pendingCalls  []string
+	resolvedCalls []struct {
+		jobID    string
+		approved bool
+	}
+}
+
+func (m *mockReporter) ReportApprovalPending(jobID, runnerName string) error {
+	m.pendingCalls = append(m.pendingCalls, jobID)
+	return nil
+}
+
+func (m *mockReporter) ReportApprovalResolved(jobID string, approved bool) error {
+	m.resolvedCalls = append(m.resolvedCalls, struct {
+		jobID    string
+		approved bool
+	}{jobID, approved})
+	return nil
+}
+
+// ── Session allow via needsConfirmation ───────────────────────────────────────
+
+func TestNeedsConfirmation_SkippedWhenSessionAllowed(t *testing.T) {
+	e := testExecutor(func(c *localconfig.LocalConfig) { c.Confirm = "always" })
+	script := "echo session-allowed"
+	// Before session-allow, confirm=always requires confirmation
+	if !e.needsConfirmation(script) {
+		t.Fatal("expected confirmation before session-allow")
+	}
+	// Add to session allows
+	fp := scriptFingerprint(script)
+	e.mu.Lock()
+	e.sessionAllows = append(e.sessionAllows, fp)
+	e.mu.Unlock()
+	// After session-allow, no confirmation needed
+	if e.needsConfirmation(script) {
+		t.Error("should not need confirmation for session-allowed script")
+	}
+}
+
+func TestNeedsConfirmation_SkippedWhenAlwaysAllowed(t *testing.T) {
+	e := testExecutor(func(c *localconfig.LocalConfig) { c.Confirm = "always" })
+	script := "echo always-allowed"
+	fp := scriptFingerprint(script)
+	e.localCfg.AlwaysAllowedPatterns = append(e.localCfg.AlwaysAllowedPatterns, fp)
+	if e.needsConfirmation(script) {
+		t.Error("should not need confirmation for always-allowed script")
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func envToMap(env []string) map[string]string {

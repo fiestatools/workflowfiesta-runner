@@ -119,6 +119,38 @@ func TestApprovalWindow_LongScript_Truncated(t *testing.T) {
 	test.Tap(denyBtn)
 }
 
+func TestApprovalWindow_AllowSessionButton_ReturnsAllowSession(t *testing.T) {
+	req := localui.SampleApprovalRequest(5 * time.Second)
+	win, _, _, allowSessionBtn, _, resultCh := localui.NewTestApprovalWindowFull(req)
+	win.Show()
+	defer win.Close()
+	test.Tap(allowSessionBtn)
+	select {
+	case result := <-resultCh:
+		if result != localui.ApprovalAllowSession {
+			t.Errorf("expected ApprovalAllowSession, got %v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no result after tapping AllowSession")
+	}
+}
+
+func TestApprovalWindow_AlwaysAllowButton_ReturnsAlwaysAllow(t *testing.T) {
+	req := localui.SampleApprovalRequest(5 * time.Second)
+	win, _, _, _, alwaysAllowBtn, resultCh := localui.NewTestApprovalWindowFull(req)
+	win.Show()
+	defer win.Close()
+	test.Tap(alwaysAllowBtn)
+	select {
+	case result := <-resultCh:
+		if result != localui.ApprovalAlwaysAllow {
+			t.Errorf("expected ApprovalAlwaysAllow, got %v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no result after tapping AlwaysAllow")
+	}
+}
+
 // ── RequestApproval headless dispatch ────────────────────────────────────────
 
 func TestRequestApproval_HeadlessTrue_UsesFallback(t *testing.T) {
