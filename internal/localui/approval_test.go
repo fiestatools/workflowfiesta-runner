@@ -29,7 +29,7 @@ func TestApprovalWindow_AllowButton_ReturnsTrue(t *testing.T) {
 
 	select {
 	case result := <-resultCh:
-		if !result {
+		if result == localui.ApprovalDeny {
 			t.Error("expected Allow to return true")
 		}
 	case <-time.After(time.Second):
@@ -47,7 +47,7 @@ func TestApprovalWindow_DenyButton_ReturnsFalse(t *testing.T) {
 
 	select {
 	case result := <-resultCh:
-		if result {
+		if result != localui.ApprovalDeny {
 			t.Error("expected Deny to return false")
 		}
 	case <-time.After(time.Second):
@@ -63,7 +63,7 @@ func TestApprovalWindow_CloseWithoutDecision_ReturnsFalse(t *testing.T) {
 
 	select {
 	case result := <-resultCh:
-		if result {
+		if result != localui.ApprovalDeny {
 			t.Error("closing window should return false (deny)")
 		}
 	case <-time.After(time.Second):
@@ -83,7 +83,7 @@ func TestApprovalWindow_ResultChannelBuffered(t *testing.T) {
 
 	select {
 	case result := <-resultCh:
-		if !result {
+		if result == localui.ApprovalDeny {
 			t.Error("first tap (Allow) should win")
 		}
 	case <-time.After(time.Second):
@@ -135,13 +135,13 @@ func TestRequestApproval_HeadlessTrue_UsesFallback(t *testing.T) {
 		Timeout: 150 * time.Millisecond,
 	}
 
-	done := make(chan bool, 1)
+	done := make(chan localui.ApprovalResult, 1)
 	go func() { done <- localui.RequestApproval(req) }()
 
 	select {
 	case result := <-done:
 		// Should auto-deny on timeout (no stdin input).
-		if result {
+		if result != localui.ApprovalDeny {
 			t.Error("expected auto-deny from headless fallback")
 		}
 	case <-time.After(2 * time.Second):

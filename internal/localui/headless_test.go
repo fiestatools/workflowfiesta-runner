@@ -73,12 +73,12 @@ func TestHeadlessApproval_Timeout_Denies(t *testing.T) {
 
 	// headlessApproval reads from stdin — with no input it will timeout.
 	// We use a very short timeout so the test completes quickly.
-	result := make(chan bool, 1)
+	result := make(chan ApprovalResult, 1)
 	go func() { result <- headlessApproval(req) }()
 
 	select {
 	case approved := <-result:
-		if approved {
+		if approved != ApprovalDeny {
 			t.Error("expected auto-deny on timeout, got approved")
 		}
 	case <-time.After(2 * time.Second):
@@ -102,12 +102,12 @@ func TestRequestApproval_Headless_Timeout(t *testing.T) {
 		Timeout: 200 * time.Millisecond,
 	}
 
-	done := make(chan bool, 1)
+	done := make(chan ApprovalResult, 1)
 	go func() { done <- RequestApproval(req) }()
 
 	select {
 	case result := <-done:
-		if result {
+		if result != ApprovalDeny {
 			t.Error("expected deny on timeout")
 		}
 	case <-time.After(2 * time.Second):

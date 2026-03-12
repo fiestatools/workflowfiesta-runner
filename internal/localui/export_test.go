@@ -21,10 +21,10 @@ func UseTestApp() {
 
 // NewTestApprovalWindow creates an approval window backed by the test app and
 // returns the window and the button references so tests can tap them directly.
-func NewTestApprovalWindow(req ApprovalRequest) (win fyne.Window, allow, deny *widget.Button, resultCh <-chan bool) {
+func NewTestApprovalWindow(req ApprovalRequest) (win fyne.Window, allow, deny *widget.Button, resultCh <-chan ApprovalResult) {
 	s := newApprovalState()
 	w := s.buildWindow(req, getApp())
-	return w, s.allowBtn, s.denyBtn, s.resultCh
+	return w, &s.allowBtn.Button, &s.denyBtn.Button, s.resultCh
 }
 
 // RegisterAPI is the internal callRegisterAPI — exposed so tests can mock the

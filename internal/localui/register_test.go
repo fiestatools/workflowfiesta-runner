@@ -30,7 +30,7 @@ func TestCallRegisterAPI_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	result, err := localui.RegisterAPI(srv.URL, "my-runner", "org-001")
+	result, err := localui.RegisterAPI(srv.URL, "my-runner", "org-001", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,12 +54,12 @@ func TestCallRegisterAPI_ServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := localui.RegisterAPI(srv.URL, "runner", "bad-org")
+	_, err := localui.RegisterAPI(srv.URL, "runner", "bad-org", "")
 	if err == nil {
 		t.Fatal("expected error for non-201 response")
 	}
-	if !strings.Contains(err.Error(), "404") {
-		t.Errorf("error should mention status code, got: %v", err)
+	if !strings.Contains(err.Error(), "endpoint not found") && !strings.Contains(err.Error(), "404") {
+		t.Errorf("error should indicate not found, got: %v", err)
 	}
 }
 
@@ -70,14 +70,14 @@ func TestCallRegisterAPI_InvalidJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := localui.RegisterAPI(srv.URL, "runner", "org")
+	_, err := localui.RegisterAPI(srv.URL, "runner", "org", "")
 	if err == nil {
 		t.Fatal("expected error for invalid JSON response")
 	}
 }
 
 func TestCallRegisterAPI_ConnectionRefused(t *testing.T) {
-	_, err := localui.RegisterAPI("http://localhost:19999", "runner", "org")
+	_, err := localui.RegisterAPI("http://localhost:19999", "runner", "org", "")
 	if err == nil {
 		t.Fatal("expected error for unreachable server")
 	}
@@ -98,7 +98,7 @@ func TestCallRegisterAPI_TrailingSlashStripped(t *testing.T) {
 	defer srv.Close()
 
 	// API URL with trailing slash — should still work.
-	_, err := localui.RegisterAPI(srv.URL+"/", "runner", "org")
+	_, err := localui.RegisterAPI(srv.URL+"/", "runner", "org", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
