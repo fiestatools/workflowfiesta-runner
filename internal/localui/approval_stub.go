@@ -3,6 +3,6 @@
 package localui
 
 // RequestApproval falls back to a terminal prompt when Fyne is not compiled in.
-func RequestApproval(req ApprovalRequest) bool {
+func RequestApproval(req ApprovalRequest) ApprovalResult {
 	return headlessApproval(req)
 }

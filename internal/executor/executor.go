@@ -36,3 +36,19 @@ func New(cfg *config.Config) Executor {
 	}
 	return &dockerExecutor{cfg: cfg}
 }
+
+// NewWithClient returns an executor based on config, passing an optional ApprovalReporter
+// to the local executor for API-side approval state reporting.
+func NewWithClient(cfg *config.Config, client ApprovalReporter) Executor {
+	if cfg.ExecutorType == "local" {
+		lc := cfg.LocalConfig
+		if lc != nil {
+			lc.RunnerName = cfg.Name
+		}
+		return NewLocal(lc, client)
+	}
+	if cfg.ExecutorType == "kubernetes" {
+		return &kubernetesExecutor{cfg: cfg}
+	}
+	return &dockerExecutor{cfg: cfg}
+}

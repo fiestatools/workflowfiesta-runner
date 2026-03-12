@@ -10,7 +10,7 @@ import (
 
 // headlessApproval prints the job details to stdout and reads a y/n response
 // with an auto-deny timeout. Used when Headless=true or in nolocalui builds.
-func headlessApproval(req ApprovalRequest) bool {
+func headlessApproval(req ApprovalRequest) ApprovalResult {
 	fmt.Printf("\n╔══════════════════════════════════════════╗\n")
 	fmt.Printf("║   WorkflowFiesta · Job Request           ║\n")
 	fmt.Printf("╚══════════════════════════════════════════╝\n")
@@ -36,13 +36,13 @@ func headlessApproval(req ApprovalRequest) bool {
 		approved := strings.ToLower(strings.TrimSpace(response)) == "y"
 		if approved {
 			fmt.Println("[allowed]")
-		} else {
-			fmt.Println("[denied]")
+			return ApprovalAllow
 		}
-		return approved
+		fmt.Println("[denied]")
+		return ApprovalDeny
 	case <-time.After(req.Timeout):
 		fmt.Println("\n[auto-denied: timeout]")
-		return false
+		return ApprovalDeny
 	}
 }
 

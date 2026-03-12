@@ -113,6 +113,14 @@ func (c *Client) ReportJobFailed(jobID, errMsg string) error {
 	return c.send(map[string]string{"type": "job:failed", "jobId": jobID, "error": errMsg})
 }
 
+func (c *Client) ReportApprovalPending(jobID, runnerName string) error {
+	return c.send(map[string]string{"type": "job:approval_pending", "jobId": jobID, "runnerName": runnerName})
+}
+
+func (c *Client) ReportApprovalResolved(jobID string, approved bool) error {
+	return c.send(map[string]interface{}{"type": "job:approval_resolved", "jobId": jobID, "approved": approved})
+}
+
 func (c *Client) Listen(ctx context.Context, jobChan chan<- Job) {
 	for {
 		select {

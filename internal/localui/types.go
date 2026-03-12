@@ -12,10 +12,28 @@ import "time"
 // Set to true before calling any UI functions when running without a display.
 var Headless bool
 
+// ApprovalResult captures the user's permission decision.
+type ApprovalResult int
+
+const (
+	ApprovalDeny         ApprovalResult = 0
+	ApprovalAllow        ApprovalResult = 1
+	ApprovalAllowSession ApprovalResult = 2
+	ApprovalAlwaysAllow  ApprovalResult = 3
+)
+
+// ApprovalCallbacks are optional hooks called when approval state changes.
+type ApprovalCallbacks struct {
+	OnPending  func()
+	OnResolved func(approved bool)
+}
+
 // ApprovalRequest carries the information shown in the approval dialog.
 type ApprovalRequest struct {
 	JobID      string
 	Script     string
 	RunnerName string
 	Timeout    time.Duration
+	PlaySound  bool
+	Callbacks  ApprovalCallbacks
 }

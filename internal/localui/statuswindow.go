@@ -174,8 +174,27 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	)
 
 	win.SetContent(content)
-	win.Resize(fyne.NewSize(480, 580))
+	savedW := float32(a.Preferences().FloatWithFallback("status.window.width", 480))
+	savedH := float32(a.Preferences().FloatWithFallback("status.window.height", 580))
+	win.Resize(fyne.NewSize(savedW, savedH))
 	win.SetFixedSize(false)
+
+	// Persist window size changes every 2 seconds
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		var lastW, lastH float32
+		for range ticker.C {
+			fyne.Do(func() {
+				sz := win.Canvas().Size()
+				if sz.Width != lastW || sz.Height != lastH {
+					lastW, lastH = sz.Width, sz.Height
+					a.Preferences().SetFloat("status.window.width", float64(sz.Width))
+					a.Preferences().SetFloat("status.window.height", float64(sz.Height))
+				}
+			})
+		}
+	}()
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()

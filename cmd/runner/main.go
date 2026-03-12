@@ -277,14 +277,17 @@ var runLocalCmd = &cobra.Command{
 		// because the Fyne event loop hasn't started yet.
 		sw.Show()
 
+		r := runner.New(cfg)
 		go func() {
-			if err := runner.New(cfg).WithSink(sw).Run(ctx); err != nil {
+			if err := r.WithSink(sw).Run(ctx); err != nil {
 				log.Errorf("Runner stopped: %v", err)
 			}
 			localui.QuitApp()
 		}()
 
-		localui.StartTray(cfg.Name, cancel, sw) // Blocks until app.Quit().
+		localui.StartTray(cfg.Name, cancel, sw, localCfg, func(updated *localconfig.LocalConfig) {
+			cfg.LocalConfig = updated
+		}) // Blocks until app.Quit().
 		return nil
 	},
 }
@@ -373,7 +376,10 @@ func main() {
 				localui.QuitApp()
 			}()
 
-			localui.SetupTray(cfg.Name, cancel, sw)
+			localCfg2 := cfg.LocalConfig
+			localui.SetupTray(cfg.Name, cancel, sw, localCfg2, func(updated *localconfig.LocalConfig) {
+				cfg.LocalConfig = updated
+			})
 		})
 		return
 	}

@@ -16,29 +16,36 @@ import (
 
 // approvalState manages the result channel for a single approval request.
 type approvalState struct {
-	resultCh chan bool
-	once     sync.Once
-	allowBtn *cursorButton
-	denyBtn  *cursorButton
-	stopTick func()
+	resultCh        chan ApprovalResult
+	once            sync.Once
+	allowBtn        *cursorButton
+	allowSessionBtn *cursorButton
+	alwaysAllowBtn  *cursorButton
+	denyBtn         *cursorButton
+	stopTick        func()
 }
 
 func newApprovalState() *approvalState {
 	return &approvalState{
-		resultCh: make(chan bool, 1),
+		resultCh: make(chan ApprovalResult, 1),
 		stopTick: func() {},
 	}
 }
 
-func (s *approvalState) decide(approved bool) {
-	s.once.Do(func() { s.resultCh <- approved })
+func (s *approvalState) decide(result ApprovalResult) {
+	s.once.Do(func() { s.resultCh <- result })
 }
 
 // buildWindow constructs the approval Fyne window, wires buttons and countdown.
 func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window {
 	win := a.NewWindow("WorkflowFiesta · Job Request")
-	win.SetFixedSize(true)
-	win.Resize(fyne.NewSize(460, 280))
+	win.SetFixedSize(false)
+
+	// Restore saved window size from preferences
+	prefs := a.Preferences()
+	savedW := prefs.FloatWithFallback("approval.window.width", 460)
+	savedH := prefs.FloatWithFallback("approval.window.height", 280)
+	win.Resize(fyne.NewSize(float32(savedW), float32(savedH)))
 
 	// ── header ──────────────────────────────────────────────────────────────
 	iconBg := canvas.NewRectangle(colorAmberDim)
@@ -103,22 +110,32 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 
 	// ── footer buttons ───────────────────────────────────────────────────────
 	s.denyBtn = newButton("✕  Deny", func() {
-		s.decide(false)
+		s.decide(ApprovalDeny)
 	})
 
 	s.allowBtn = newButton("✓  Allow", func() {
-		s.decide(true)
+		s.decide(ApprovalAllow)
 	})
 	s.allowBtn.Importance = widget.SuccessImportance
+
+	s.allowSessionBtn = newButton("Allow for session", func() {
+		s.decide(ApprovalAllowSession)
+	})
+	s.allowSessionBtn.Importance = widget.LowImportance
+
+	s.alwaysAllowBtn = newButton("Always allow", func() {
+		s.decide(ApprovalAlwaysAllow)
+	})
+	s.alwaysAllowBtn.Importance = widget.LowImportance
 
 	footerBg := canvas.NewRectangle(colorCard)
 	footerBg.StrokeColor = colorBorder
 	footerBg.StrokeWidth = 1
-	footerRow := container.NewHBox(layout.NewSpacer(), s.denyBtn, s.allowBtn)
+	footerRow := container.NewHBox(layout.NewSpacer(), s.denyBtn, s.allowSessionBtn, s.alwaysAllowBtn, s.allowBtn)
 	footer := container.NewStack(footerBg, container.NewPadded(footerRow))
 
 	win.SetContent(container.NewVBox(header, body, footer))
-	win.SetOnClosed(func() { s.decide(false) })
+	win.SetOnClosed(func() { s.decide(ApprovalDeny) })
 
 	// ── countdown ticker ─────────────────────────────────────────────────────
 	stopped := make(chan struct{})
@@ -135,7 +152,7 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 			case <-ticker.C:
 				remaining--
 				if remaining <= 0 {
-					s.decide(false)
+					s.decide(ApprovalDeny)
 					win.Close()
 					return
 				}
@@ -148,27 +165,70 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 		}
 	}()
 
+	// ── size persistence goroutine ────────────────────────────────────────────
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		var lastW, lastH float32
+		for {
+			select {
+			case <-stopped:
+				return
+			case <-ticker.C:
+				fyne.Do(func() {
+					sz := win.Canvas().Size()
+					if sz.Width != lastW || sz.Height != lastH {
+						lastW, lastH = sz.Width, sz.Height
+						prefs.SetFloat("approval.window.width", float64(sz.Width))
+						prefs.SetFloat("approval.window.height", float64(sz.Height))
+					}
+				})
+			}
+		}
+	}()
+
 	return win
 }
 
 // RequestApproval shows an approval dialog and blocks until the user decides or timeout.
-func RequestApproval(req ApprovalRequest) bool {
+func RequestApproval(req ApprovalRequest) ApprovalResult {
 	if Headless {
 		return headlessApproval(req)
 	}
 	return fyneApproval(req)
 }
 
-func fyneApproval(req ApprovalRequest) bool {
+func fyneApproval(req ApprovalRequest) ApprovalResult {
 	s := newApprovalState()
 	win := s.buildWindow(req, getApp())
-	positionBottomRight(win)
+	restoreApprovalPosition(win)
 	win.Show()
+	win.RequestFocus()
+
+	if req.PlaySound {
+		playApprovalSound()
+	}
+	if req.Callbacks.OnPending != nil {
+		req.Callbacks.OnPending()
+	}
+
 	result := <-s.resultCh
 	s.stopTick()
+
+	if req.Callbacks.OnResolved != nil {
+		req.Callbacks.OnResolved(result != ApprovalDeny)
+	}
+
 	win.Close()
 	return result
 }
 
-// positionBottomRight is a no-op; fyne.Window does not expose Move in v2.5.
-func positionBottomRight(_ fyne.Window) {}
+// restoreApprovalPosition restores the approval window position from Fyne preferences,
+// centering on screen if no saved position is available.
+func restoreApprovalPosition(w fyne.Window) {
+	// Fyne's Window interface does not expose a Move() method; position is set
+	// by the OS window manager. We center as the best cross-platform default.
+	// Users configure preferred screen quadrant via the Settings window which
+	// stores approval.window.x/y for use when Fyne exposes positioning.
+	w.CenterOnScreen()
+}

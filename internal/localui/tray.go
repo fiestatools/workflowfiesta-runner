@@ -13,6 +13,8 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
+
+	"workflowfiesta-runner/internal/localconfig"
 )
 
 var (
@@ -39,16 +41,25 @@ func QuitApp() {
 
 // SetupTray configures the system tray icon and menu without starting the event
 // loop. Call this before a.Run() when you need to manage the loop yourself.
-func SetupTray(runnerName string, onStop func(), sw *StatusWindow) {
+// cfg and onConfigSaved are used for the Settings menu item; both may be nil.
+func SetupTray(runnerName string, onStop func(), sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
 	a := getApp()
 	if desk, ok := a.(desktop.App); ok {
 		var showItem *fyne.MenuItem
 		if sw != nil {
 			showItem = fyne.NewMenuItem("Open Status Window", func() { sw.Show() })
 		}
+
+		settingsItem := fyne.NewMenuItem("Settings…", func() {
+			if cfg != nil {
+				OpenSettingsWindow(cfg, localconfig.DefaultPath(), onConfigSaved)
+			}
+		})
+
 		items := []*fyne.MenuItem{
 			fyne.NewMenuItem("WorkflowFiesta Runner · running", nil),
 			fyne.NewMenuItemSeparator(),
+			settingsItem,
 		}
 		if showItem != nil {
 			items = append(items, showItem)
@@ -71,8 +82,9 @@ func SetupTray(runnerName string, onStop func(), sw *StatusWindow) {
 // StartTray sets up the system tray icon and starts the Fyne event loop.
 // Blocks until the event loop exits. onStop is called on "Stop Runner".
 // sw is the StatusWindow to show/re-open from the tray menu; may be nil.
-func StartTray(runnerName string, onStop func(), sw *StatusWindow) {
-	SetupTray(runnerName, onStop, sw)
+// cfg and onConfigSaved are passed to the Settings menu item.
+func StartTray(runnerName string, onStop func(), sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
+	SetupTray(runnerName, onStop, sw, cfg, onConfigSaved)
 	getApp().Run()
 }
 

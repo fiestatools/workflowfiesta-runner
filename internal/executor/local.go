@@ -3,6 +3,7 @@ package executor
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,9 +21,17 @@ import (
 	"workflowfiesta-runner/internal/localui"
 )
 
+// ApprovalReporter is an optional interface for reporting approval state to the API.
+type ApprovalReporter interface {
+	ReportApprovalPending(jobID, runnerName string) error
+	ReportApprovalResolved(jobID string, approved bool) error
+}
 
 type localExecutor struct {
-	localCfg *localconfig.LocalConfig
+	localCfg      *localconfig.LocalConfig
+	apiClient     ApprovalReporter
+	sessionAllows []string
+	mu            sync.Mutex
 }
 
 func newLocalExecutor(cfg *localconfig.LocalConfig) *localExecutor {
@@ -30,6 +39,42 @@ func newLocalExecutor(cfg *localconfig.LocalConfig) *localExecutor {
 		cfg = localconfig.Default()
 	}
 	return &localExecutor{localCfg: cfg}
+}
+
+// NewLocal creates a localExecutor with an optional ApprovalReporter client.
+func NewLocal(cfg *localconfig.LocalConfig, client ApprovalReporter) *localExecutor {
+	if cfg == nil {
+		cfg = localconfig.Default()
+	}
+	return &localExecutor{localCfg: cfg, apiClient: client}
+}
+
+// scriptFingerprint returns a hex SHA-256 fingerprint of the script.
+func scriptFingerprint(script string) string {
+	h := sha256.Sum256([]byte(script))
+	return fmt.Sprintf("%x", h)
+}
+
+func (e *localExecutor) isSessionAllowed(script string) bool {
+	fp := scriptFingerprint(script)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, s := range e.sessionAllows {
+		if s == fp {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *localExecutor) isAlwaysAllowed(script string) bool {
+	fp := scriptFingerprint(script)
+	for _, s := range e.localCfg.AlwaysAllowedPatterns {
+		if s == fp {
+			return true
+		}
+	}
+	return false
 }
 
 // auditEntry is a single line in the JSON audit log.
@@ -61,14 +106,26 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 
 	// Layer 2: Confirmation gate.
 	if e.needsConfirmation(input.Script) {
+		if e.apiClient != nil {
+			_ = e.apiClient.ReportApprovalPending(input.JobID, e.localCfg.RunnerName)
+		}
 		timeout := time.Duration(e.localCfg.ConfirmTimeout) * time.Second
-		approved := localui.RequestApproval(localui.ApprovalRequest{
+		result := localui.RequestApproval(localui.ApprovalRequest{
 			JobID:      input.JobID,
 			Script:     input.Script,
 			RunnerName: e.localCfg.RunnerName,
 			Timeout:    timeout,
+			PlaySound:  e.localCfg.SoundOnApproval,
+			Callbacks: localui.ApprovalCallbacks{
+				OnResolved: func(approved bool) {
+					if e.apiClient != nil {
+						_ = e.apiClient.ReportApprovalResolved(input.JobID, approved)
+					}
+				},
+			},
 		})
-		if !approved {
+		switch result {
+		case localui.ApprovalDeny:
 			e.writeAudit(auditEntry{
 				Time:     start.UTC().Format(time.RFC3339),
 				JobID:    input.JobID,
@@ -77,6 +134,20 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 				Reason:   "user_denied",
 			})
 			return -1, fmt.Errorf("job denied")
+		case localui.ApprovalAllowSession:
+			fp := scriptFingerprint(input.Script)
+			e.mu.Lock()
+			e.sessionAllows = append(e.sessionAllows, fp)
+			e.mu.Unlock()
+		case localui.ApprovalAlwaysAllow:
+			fp := scriptFingerprint(input.Script)
+			e.mu.Lock()
+			e.localCfg.AlwaysAllowedPatterns = append(e.localCfg.AlwaysAllowedPatterns, fp)
+			e.mu.Unlock()
+			if saveErr := localconfig.Save(e.localCfg, localconfig.DefaultPath()); saveErr != nil {
+				log.Warnf("[local] failed to save always-allow config: %v", saveErr)
+			}
+		// ApprovalAllow falls through to execution
 		}
 	}
 
@@ -145,6 +216,10 @@ var destructiveRe = []*regexp.Regexp{
 }
 
 func (e *localExecutor) needsConfirmation(script string) bool {
+	// Session and always-allow lists bypass confirmation.
+	if e.isSessionAllowed(script) || e.isAlwaysAllowed(script) {
+		return false
+	}
 	switch e.localCfg.Confirm {
 	case "always":
 		return true

@@ -11,14 +11,16 @@ import (
 
 // LocalConfig holds the configuration for local executor mode, loaded from runner.yaml.
 type LocalConfig struct {
-	AllowedPaths    []string `yaml:"allowed_paths"`
-	Confirm         string   `yaml:"confirm"`          // "always", "destructive", "never"
-	Network         string   `yaml:"network"`          // "all", "localhost", "none"
-	MaxTimeout      int      `yaml:"max_timeout"`      // seconds
-	ConfirmTimeout  int      `yaml:"confirm_timeout"`  // seconds
-	BlockedPatterns []string `yaml:"blocked_patterns"` // regex patterns
-	Sandbox         string   `yaml:"sandbox"`          // "none", "kernel"
-	AuditLog        string   `yaml:"audit_log"`        // path
+	AllowedPaths          []string `yaml:"allowed_paths"`
+	Confirm               string   `yaml:"confirm"`           // "always", "destructive", "never"
+	Network               string   `yaml:"network"`           // "all", "localhost", "none"
+	MaxTimeout            int      `yaml:"max_timeout"`       // seconds
+	ConfirmTimeout        int      `yaml:"confirm_timeout"`   // seconds
+	BlockedPatterns       []string `yaml:"blocked_patterns"`  // regex patterns
+	Sandbox               string   `yaml:"sandbox"`           // "none", "kernel"
+	AuditLog              string   `yaml:"audit_log"`         // path
+	SoundOnApproval       bool     `yaml:"sound_on_approval"`
+	AlwaysAllowedPatterns []string `yaml:"always_allowed_patterns"`
 
 	// EnvironmentID is the UUID of an existing environment to associate this runner with.
 	// If empty, the server auto-creates a new environment on registration.
@@ -43,11 +45,12 @@ func Default() *LocalConfig {
 	home, _ := os.UserHomeDir()
 	auditLog := filepath.Join(home, ".workflowfiesta", "audit.log")
 	return &LocalConfig{
-		AllowedPaths: []string{"~/"},
-		Confirm:      "destructive",
-		Network:      "all",
-		MaxTimeout:   120,
-		ConfirmTimeout: 60,
+		AllowedPaths:    []string{"~/"},
+		Confirm:         "destructive",
+		Network:         "all",
+		MaxTimeout:      120,
+		ConfirmTimeout:  60,
+		SoundOnApproval: false,
 		BlockedPatterns: []string{
 			`rm\s+-rf\s+/`,
 			`rm\s+-rf\s+~`,

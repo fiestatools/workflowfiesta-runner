@@ -31,10 +31,11 @@ type Runner struct {
 
 func New(cfg *config.Config) *Runner {
 	apiURL := cfg.APIURL
+	client := api.New(apiURL, cfg.Token)
 	return &Runner{
 		cfg:      cfg,
-		client:   api.New(apiURL, cfg.Token),
-		executor: executor.New(cfg),
+		client:   client,
+		executor: executor.NewWithClient(cfg, client),
 	}
 }
 
