@@ -92,6 +92,13 @@ type auditEntry struct {
 func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	start := time.Now()
 
+	// emit sends msg to the output channel so it appears in the step's output log.
+	emit := func(msg string) {
+		if input.OutputChan != nil {
+			input.OutputChan <- msg
+		}
+	}
+
 	// Layer 1: Blocked pattern check.
 	if pattern, blocked := e.blockedPatternCheck(input.Script); blocked {
 		e.writeAudit(auditEntry{
@@ -101,7 +108,8 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 			Decision: "blocked",
 			Reason:   "blocked_pattern:" + pattern,
 		})
-		return -1, fmt.Errorf("script blocked by pattern %q", pattern)
+		emit(fmt.Sprintf("[runner] script blocked by pattern %q — update your runner's blocked_patterns config to allow this script\n", pattern))
+		return 1, nil
 	}
 
 	// Layer 2: Confirmation gate.
@@ -133,7 +141,8 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 				Decision: "denied",
 				Reason:   "user_denied",
 			})
-			return -1, fmt.Errorf("job denied")
+			emit("[runner] job denied by local operator — approve the job in the runner's approval dialog to allow execution\n")
+			return 1, nil
 		case localui.ApprovalAllowSession:
 			fp := scriptFingerprint(input.Script)
 			e.mu.Lock()

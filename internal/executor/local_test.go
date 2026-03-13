@@ -303,17 +303,27 @@ func TestWriteAudit_FileMode(t *testing.T) {
 
 // ── Execute integration ───────────────────────────────────────────────────────
 
-func TestExecute_BlockedScript_ReturnsError(t *testing.T) {
+func TestExecute_BlockedScript_ReturnsNonZeroWithMessage(t *testing.T) {
 	e := testExecutor()
-	_, err := e.Execute(context.Background(), Input{
-		JobID:  "blocked",
-		Script: "rm -rf /",
+	outputChan := make(chan string, 10)
+	exitCode, err := e.Execute(context.Background(), Input{
+		JobID:      "blocked",
+		Script:     "rm -rf /",
+		OutputChan: outputChan,
 	})
-	if err == nil {
-		t.Fatal("expected error for blocked script")
+	if err != nil {
+		t.Fatalf("expected nil error for blocked script (message goes to output), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "blocked") {
-		t.Errorf("error should mention 'blocked', got: %v", err)
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code for blocked script")
+	}
+	close(outputChan)
+	var out strings.Builder
+	for chunk := range outputChan {
+		out.WriteString(chunk)
+	}
+	if !strings.Contains(out.String(), "blocked") {
+		t.Errorf("output should mention 'blocked', got: %q", out.String())
 	}
 }
 
