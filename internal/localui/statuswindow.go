@@ -122,7 +122,7 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 		title := widget.NewLabel("Still running in the background")
 		title.TextStyle = fyne.TextStyle{Bold: true}
 
-		body := widget.NewLabel("WorkflowFiesta Runner will continue running\nafter you close this window.\n\nTo reopen it or quit, right-click the\nWorkflowFiesta icon in your system tray\n(bottom-right corner of the taskbar).")
+		body := widget.NewLabel("WorkflowFiesta Runner will continue running after you close this window. To reopen it or quit, right-click the WorkflowFiesta icon in your system tray (bottom-right corner of the taskbar).")
 		body.Wrapping = fyne.TextWrapWord
 
 		content := container.NewVBox(
@@ -171,22 +171,17 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	win.Resize(fyne.NewSize(savedW, savedH))
 	win.SetFixedSize(false)
 
-	// Persist window size changes every 2 seconds
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		var lastW, lastH float32
-		for range ticker.C {
-			fyne.Do(func() {
-				sz := win.Canvas().Size()
-				if sz.Width != lastW || sz.Height != lastH {
-					lastW, lastH = sz.Width, sz.Height
-					a.Preferences().SetFloat("status.window.width", float64(sz.Width))
-					a.Preferences().SetFloat("status.window.height", float64(sz.Height))
-				}
-			})
+	// Persist window size — debounce on resize so content reflows don't trigger spurious saves
+	var resizeTimer *time.Timer
+	win.SetOnResized(func(size fyne.Size) {
+		if resizeTimer != nil {
+			resizeTimer.Stop()
 		}
-	}()
+		resizeTimer = time.AfterFunc(500*time.Millisecond, func() {
+			a.Preferences().SetFloat("status.window.width", float64(size.Width))
+			a.Preferences().SetFloat("status.window.height", float64(size.Height))
+		})
+	})
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()

@@ -165,27 +165,17 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 		}
 	}()
 
-	// ── size persistence goroutine ────────────────────────────────────────────
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		var lastW, lastH float32
-		for {
-			select {
-			case <-stopped:
-				return
-			case <-ticker.C:
-				fyne.Do(func() {
-					sz := win.Canvas().Size()
-					if sz.Width != lastW || sz.Height != lastH {
-						lastW, lastH = sz.Width, sz.Height
-						prefs.SetFloat("approval.window.width", float64(sz.Width))
-						prefs.SetFloat("approval.window.height", float64(sz.Height))
-					}
-				})
-			}
+	// ── size persistence — debounce on resize so content reflows don't trigger spurious saves ─
+	var resizeTimer *time.Timer
+	win.SetOnResized(func(size fyne.Size) {
+		if resizeTimer != nil {
+			resizeTimer.Stop()
 		}
-	}()
+		resizeTimer = time.AfterFunc(500*time.Millisecond, func() {
+			prefs.SetFloat("approval.window.width", float64(size.Width))
+			prefs.SetFloat("approval.window.height", float64(size.Height))
+		})
+	})
 
 	return win
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"workflowfiesta-runner/internal/localconfig"
@@ -71,11 +72,13 @@ func Load() *Config {
 		dockerSocket = "/var/run/docker.sock"
 	}
 
-	// Determine executor type: explicit override, k8s auto-detect, or docker.
+	// Determine executor type: explicit override, k8s auto-detect, Windows default, or docker.
 	executorType := os.Getenv("CONTAINER_RUNTIME")
 	if executorType == "" {
 		if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 			executorType = "kubernetes"
+		} else if runtime.GOOS == "windows" {
+			executorType = "local"
 		} else {
 			executorType = "docker"
 		}
