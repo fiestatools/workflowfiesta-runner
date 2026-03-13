@@ -334,6 +334,10 @@ func execAndStream(ctx context.Context, cmd *exec.Cmd, outputChan chan<- string)
 	stream := func(r io.Reader) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(r)
+		// Default max token size is 64 KB which silently drops longer lines
+		// (e.g. a single-line JSON payload with embedded file contents).
+		// Use 10 MB to handle large script outputs.
+		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
 			if outputChan != nil {
 				outputChan <- scanner.Text() + "\n"
