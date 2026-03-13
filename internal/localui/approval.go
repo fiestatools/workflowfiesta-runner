@@ -165,17 +165,34 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 		}
 	}()
 
-	// ── size persistence — debounce on resize so content reflows don't trigger spurious saves ─
-	var resizeTimer *time.Timer
-	win.SetOnResized(func(size fyne.Size) {
-		if resizeTimer != nil {
-			resizeTimer.Stop()
+	// ── size persistence — only save after 3 consecutive stable readings to avoid
+	// spurious saves from content reflows mid-job ────────────────────────────
+	var resizeSaveW, resizeSaveH float32
+	var resizeStable int
+	go func() {
+		sizeTicker := time.NewTicker(time.Second)
+		defer sizeTicker.Stop()
+		for {
+			select {
+			case <-stopped:
+				return
+			case <-sizeTicker.C:
+				fyne.Do(func() {
+					sz := win.Canvas().Size()
+					if sz.Width == resizeSaveW && sz.Height == resizeSaveH {
+						resizeStable++
+						if resizeStable == 3 {
+							prefs.SetFloat("approval.window.width", float64(sz.Width))
+							prefs.SetFloat("approval.window.height", float64(sz.Height))
+						}
+					} else {
+						resizeSaveW, resizeSaveH = sz.Width, sz.Height
+						resizeStable = 0
+					}
+				})
+			}
 		}
-		resizeTimer = time.AfterFunc(500*time.Millisecond, func() {
-			prefs.SetFloat("approval.window.width", float64(size.Width))
-			prefs.SetFloat("approval.window.height", float64(size.Height))
-		})
-	})
+	}()
 
 	return win
 }
