@@ -174,17 +174,6 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	win.Resize(fyne.NewSize(savedW, savedH))
 	win.SetFixedSize(false)
 
-	// Persist window size — debounce on resize so content reflows don't trigger spurious saves
-	var resizeTimer *time.Timer
-	win.SetOnResized(func(size fyne.Size) {
-		if resizeTimer != nil {
-			resizeTimer.Stop()
-		}
-		resizeTimer = time.AfterFunc(500*time.Millisecond, func() {
-			a.Preferences().SetFloat("status.window.width", float64(size.Width))
-			a.Preferences().SetFloat("status.window.height", float64(size.Height))
-		})
-	})
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()
