@@ -174,6 +174,23 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	win.Resize(fyne.NewSize(savedW, savedH))
 	win.SetFixedSize(false)
 
+	// Persist window size whenever the user resizes it manually. This prevents
+	// the window from growing back after a restart due to content min-size changes
+	// (fixes #18 / #32: window grows randomly and cannot be shrunk back).
+	prefs := a.Preferences()
+	go func() {
+		var lastSz fyne.Size
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			sz := win.Canvas().Size()
+			if sz.Width > 0 && sz.Height > 0 && sz != lastSz {
+				lastSz = sz
+				prefs.SetFloat("status.window.width", float64(sz.Width))
+				prefs.SetFloat("status.window.height", float64(sz.Height))
+			}
+		}
+	}()
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()
@@ -354,8 +371,10 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	sw.logRich = widget.NewRichText()
 	sw.logRich.Wrapping = fyne.TextWrapOff
 
-	sw.logScroll = container.NewVScroll(sw.logRich)
-	sw.logScroll.SetMinSize(fyne.NewSize(460, 160))
+	// NewScroll provides both horizontal and vertical scrolling so that wide
+	// log lines are scrolled rather than forcing the window to expand (#18, #32).
+	sw.logScroll = container.NewScroll(sw.logRich)
+	sw.logScroll.SetMinSize(fyne.NewSize(0, 160))
 
 	termBodyBg := canvas.NewRectangle(colorTermBg)
 	termBodyBg.StrokeColor = colorBorder
