@@ -174,6 +174,8 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	win.Resize(fyne.NewSize(savedW, savedH))
 	win.SetFixedSize(false)
 
+	// Periodically save window size so user-initiated resizes persist.
+	go sw.windowSizeSaver(a)
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()
@@ -355,7 +357,7 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	sw.logRich.Wrapping = fyne.TextWrapOff
 
 	sw.logScroll = container.NewVScroll(sw.logRich)
-	sw.logScroll.SetMinSize(fyne.NewSize(460, 160))
+	sw.logScroll.SetMinSize(fyne.NewSize(0, 160))
 
 	termBodyBg := canvas.NewRectangle(colorTermBg)
 	termBodyBg.StrokeColor = colorBorder
@@ -441,6 +443,20 @@ func deriveWebURL(apiURL string) string {
 // Show makes the window visible.
 func (sw *StatusWindow) Show() {
 	sw.win.Show()
+}
+
+// windowSizeSaver periodically saves the window size to app preferences so that
+// user-initiated resizes are preserved across restarts (closes #18, closes #32).
+func (sw *StatusWindow) windowSizeSaver(a fyne.App) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		size := sw.win.Canvas().Size()
+		if size.Width > 0 && size.Height > 0 {
+			a.Preferences().SetFloat("status.window.width", float64(size.Width))
+			a.Preferences().SetFloat("status.window.height", float64(size.Height))
+		}
+	}
 }
 
 // SetOnOpenSettings registers a callback to be invoked when the user clicks
