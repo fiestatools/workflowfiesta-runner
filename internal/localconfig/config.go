@@ -48,8 +48,8 @@ func Default() *LocalConfig {
 		AllowedPaths:    []string{"~/"},
 		Confirm:         "destructive",
 		Network:         "all",
-		MaxTimeout:      120,
-		ConfirmTimeout:  60,
+		MaxTimeout:      180,
+		ConfirmTimeout:  120,
 		SoundOnApproval: false,
 		BlockedPatterns: []string{
 			`rm\s+-rf\s+/`,
@@ -126,7 +126,7 @@ func (c *LocalConfig) IsPathReadOnly(path string) bool {
 func (c *LocalConfig) WorkingDir() string {
 	for _, p := range c.AllowedPaths {
 		if !strings.HasSuffix(p, ":ro") {
-			expanded := expandTilde(p)
+			expanded := filepath.Clean(expandTilde(p))
 			if info, err := os.Stat(expanded); err == nil && info.IsDir() {
 				return expanded
 			}

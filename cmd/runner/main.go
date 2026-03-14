@@ -273,6 +273,13 @@ var runLocalCmd = &cobra.Command{
 		// The runner runs in a goroutine; Fyne event loop on main thread.
 		// macOS requires the GUI event loop on the main OS thread.
 		sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
+		// Wire up the settings gear button on the status window.
+		sw.SetOnOpenSettings(func() {
+			localui.OpenSettingsWindow(localCfg, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
+				cfg.LocalConfig = updated
+				localCfg = updated
+			})
+		})
 		// Show before a.Run() — must be a direct call, not via fyne.Do,
 		// because the Fyne event loop hasn't started yet.
 		sw.Show()
@@ -359,6 +366,14 @@ func main() {
 			ctx, cancel := context.WithCancel(context.Background())
 
 			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
+			localCfg2 := cfg.LocalConfig
+			// Wire up the settings gear button on the status window.
+			sw.SetOnOpenSettings(func() {
+				localui.OpenSettingsWindow(localCfg2, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
+					cfg.LocalConfig = updated
+					localCfg2 = updated
+				})
+			})
 			sw.Show()
 
 			sigs := make(chan os.Signal, 1)
@@ -376,7 +391,6 @@ func main() {
 				localui.QuitApp()
 			}()
 
-			localCfg2 := cfg.LocalConfig
 			localui.SetupTray(cfg.Name, cancel, sw, localCfg2, func(updated *localconfig.LocalConfig) {
 				cfg.LocalConfig = updated
 			})

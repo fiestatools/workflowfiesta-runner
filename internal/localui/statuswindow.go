@@ -108,7 +108,10 @@ type StatusWindow struct {
 	jobsFailed  int
 	startTime   time.Time
 	jobStarted  time.Time
-	stopElapsed func()
+	stopElapsed     func()
+
+	// onOpenSettings is called when the user clicks the settings gear button.
+	onOpenSettings func()
 }
 
 // NewStatusWindow creates the status window (does not show it yet).
@@ -171,17 +174,6 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	win.Resize(fyne.NewSize(savedW, savedH))
 	win.SetFixedSize(false)
 
-	// Persist window size — debounce on resize so content reflows don't trigger spurious saves
-	var resizeTimer *time.Timer
-	win.SetOnResized(func(size fyne.Size) {
-		if resizeTimer != nil {
-			resizeTimer.Stop()
-		}
-		resizeTimer = time.AfterFunc(500*time.Millisecond, func() {
-			a.Preferences().SetFloat("status.window.width", float64(size.Width))
-			a.Preferences().SetFloat("status.window.height", float64(size.Height))
-		})
-	})
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()
@@ -224,11 +216,20 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 	sw.badgeBg.CornerRadius = 10
 	badge := container.NewStack(sw.badgeBg, container.NewPadded(badgeInner))
 
+	// Gear / settings button
+	settingsBtn := newButton("⚙", func() {
+		if sw.onOpenSettings != nil {
+			sw.onOpenSettings()
+		}
+	})
+	settingsBtn.Importance = widget.LowImportance
+
 	row := container.NewHBox(
 		iconCell,
 		container.NewPadded(infoCol),
 		layout.NewSpacer(),
 		badge,
+		settingsBtn,
 	)
 
 	bg := canvas.NewRectangle(colorSurface)
@@ -440,6 +441,12 @@ func deriveWebURL(apiURL string) string {
 // Show makes the window visible.
 func (sw *StatusWindow) Show() {
 	sw.win.Show()
+}
+
+// SetOnOpenSettings registers a callback to be invoked when the user clicks
+// the settings gear button in the status window header.
+func (sw *StatusWindow) SetOnOpenSettings(fn func()) {
+	sw.onOpenSettings = fn
 }
 
 // SetConnected updates the connection indicator.

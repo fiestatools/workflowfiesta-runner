@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -27,7 +28,7 @@ func RunWizard(configPath string) error {
 
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta · Setup")
-	win.Resize(fyne.NewSize(500, 440))
+	win.Resize(fyne.NewSize(520, 520))
 	win.CenterOnScreen()
 
 	cfg := localconfig.Default()
@@ -143,9 +144,32 @@ func RunWizard(configPath string) error {
 	)
 	confirmRadio.SetSelected("Risky operations only (recommended)")
 
+	// Confirm Timeout
+	confirmTimeoutEntry := widget.NewEntry()
+	confirmTimeoutEntry.SetText(strconv.Itoa(cfg.ConfirmTimeout))
+	confirmTimeoutHint := makeHintText(
+		"How long (in seconds) to wait for your approval before cancelling the job. Default: 120 s.",
+	)
+
+	// Max Timeout
+	maxTimeoutEntry := widget.NewEntry()
+	maxTimeoutEntry.SetText(strconv.Itoa(cfg.MaxTimeout))
+	maxTimeoutHint := makeHintText(
+		"Maximum time (in seconds) a single job is allowed to run. Jobs exceeding this limit are terminated. Default: 180 s.",
+	)
+
+	// Sound on approval
+	soundCheck := widget.NewCheck("Play a sound when an approval request arrives", nil)
+	soundCheck.SetChecked(cfg.SoundOnApproval)
+
 	stepContainers[1] = container.NewVBox(
-		makeStepHeading("Approval Prompt", "When should you be asked to review a job before it runs?"),
+		makeStepHeading("Approval & Timeouts", "When should you be asked to review a job, and how long should it wait?"),
 		confirmRadio,
+		widget.NewSeparator(),
+		makeLabeledEntryWithHint("Confirm timeout (seconds)", confirmTimeoutEntry, confirmTimeoutHint),
+		makeLabeledEntryWithHint("Max timeout (seconds)", maxTimeoutEntry, maxTimeoutHint),
+		widget.NewSeparator(),
+		soundCheck,
 	)
 
 	// ── Step 3: Network ───────────────────────────────────────────────────────
@@ -175,9 +199,21 @@ func RunWizard(configPath string) error {
 	)
 
 	updateSummary := func() {
+		confirmTO := confirmTimeoutEntry.Text
+		if confirmTO == "" {
+			confirmTO = strconv.Itoa(cfg.ConfirmTimeout)
+		}
+		maxTO := maxTimeoutEntry.Text
+		if maxTO == "" {
+			maxTO = strconv.Itoa(cfg.MaxTimeout)
+		}
+		soundStr := "off"
+		if soundCheck.Checked {
+			soundStr = "on"
+		}
 		summaryLabel.SetText(fmt.Sprintf(
-			"Allowed paths:\n%s\n\nApproval:  %s\nNetwork:   %s",
-			pathsEntry.Text, confirmRadio.Selected, networkRadio.Selected,
+			"Allowed paths:\n%s\n\nApproval:         %s\nConfirm timeout:  %s s\nMax timeout:      %s s\nSound on approval: %s\nNetwork:          %s",
+			pathsEntry.Text, confirmRadio.Selected, confirmTO, maxTO, soundStr, networkRadio.Selected,
 		))
 	}
 
@@ -212,6 +248,17 @@ func RunWizard(configPath string) error {
 		default:
 			cfg.Confirm = "destructive"
 		}
+
+		// Parse confirm timeout
+		if v, err := strconv.Atoi(confirmTimeoutEntry.Text); err == nil && v > 0 {
+			cfg.ConfirmTimeout = v
+		}
+		// Parse max timeout
+		if v, err := strconv.Atoi(maxTimeoutEntry.Text); err == nil && v > 0 {
+			cfg.MaxTimeout = v
+		}
+
+		cfg.SoundOnApproval = soundCheck.Checked
 
 		switch networkRadio.Selected {
 		case "Local only (localhost / LAN)":
@@ -254,6 +301,24 @@ func RunWizard(configPath string) error {
 	showStep(0)
 	win.ShowAndRun()
 	return saveErr
+}
+
+// makeHintText creates a small muted hint label.
+func makeHintText(text string) *canvas.Text {
+	t := canvas.NewText(text, colorLabel)
+	t.TextSize = 11
+	return t
+}
+
+// makeLabeledEntryWithHint creates a labeled entry with a hint below it.
+func makeLabeledEntryWithHint(label string, entry *widget.Entry, hint *canvas.Text) fyne.CanvasObject {
+	lbl := widget.NewLabel(label)
+	lbl.TextStyle = fyne.TextStyle{Bold: true}
+	return container.NewVBox(
+		lbl,
+		entry,
+		container.NewWithoutLayout(hint),
+	)
 }
 
 // hasDisplay returns false when running on Linux without a display server.

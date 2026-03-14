@@ -18,11 +18,11 @@ func TestDefault_Values(t *testing.T) {
 	if cfg.Sandbox != "none" {
 		t.Errorf("Sandbox = %q, want %q", cfg.Sandbox, "none")
 	}
-	if cfg.MaxTimeout != 120 {
-		t.Errorf("MaxTimeout = %d, want 120", cfg.MaxTimeout)
+	if cfg.MaxTimeout != 180 {
+		t.Errorf("MaxTimeout = %d, want 180", cfg.MaxTimeout)
 	}
-	if cfg.ConfirmTimeout != 60 {
-		t.Errorf("ConfirmTimeout = %d, want 60", cfg.ConfirmTimeout)
+	if cfg.ConfirmTimeout != 120 {
+		t.Errorf("ConfirmTimeout = %d, want 120", cfg.ConfirmTimeout)
 	}
 	if len(cfg.AllowedPaths) == 0 {
 		t.Error("AllowedPaths should not be empty")
