@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -215,12 +216,32 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		widget.NewLabel("Click Next to configure local permissions."),
 	)
 
-	// ── Step 2: Local config ──────────────────────────────────────────────────
+		// ── Step 2: Local config ──────────────────────────────────────────────────
 	confirmRadio := widget.NewRadioGroup(
 		[]string{"Always (every job)", "Risky operations only (recommended)", "Never"},
 		nil,
 	)
 	confirmRadio.SetSelected("Risky operations only (recommended)")
+
+	confirmTimeoutEntry := widget.NewEntry()
+	confirmTimeoutEntry.SetText("120")
+	confirmTimeoutHint := makeHintText(
+		"Seconds to wait for your approval before the job is cancelled (default: 120).",
+	)
+
+	maxTimeoutEntry := widget.NewEntry()
+	maxTimeoutEntry.SetText("180")
+	maxTimeoutHint := makeHintText(
+		"Maximum seconds a single job may run before it is forcibly terminated (default: 180).",
+	)
+
+	soundCheck := widget.NewCheck("Play a sound when an approval request arrives", nil)
+
+	pathsEntry := widget.NewMultiLineEntry()
+	pathsEntry.SetPlaceHolder("One path per line, e.g.\n~/projects\n~/Documents:ro")
+	pathsEntry.SetText("~/")
+	pathsEntry.SetMinRowsVisible(3)
+	pathHint := makeHintText("Append :ro for read-only access.")
 
 	networkRadio := widget.NewRadioGroup(
 		[]string{"Allow all (recommended)", "Local only", "Block all"},
@@ -229,14 +250,23 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	networkRadio.SetSelected("Allow all (recommended)")
 
 	steps[2] = container.NewVBox(
-		makeStepHeading("Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
+		makeStepHeading("Local Permissions", "Control what scripts can access and whether you\'re prompted for approval."),
+		makeSectionLabel("Folder Access"),
+		pathsEntry,
+		container.NewWithoutLayout(pathHint),
+		widget.NewSeparator(),
 		makeSectionLabel("Approval Prompt"),
 		confirmRadio,
+		makeLabeledEntryWithHint("Confirm timeout (seconds)", confirmTimeoutEntry, confirmTimeoutHint),
+		makeLabeledEntryWithHint("Max timeout (seconds)", maxTimeoutEntry, maxTimeoutHint),
+		widget.NewSeparator(),
+		soundCheck,
+		widget.NewSeparator(),
 		makeSectionLabel("Network Access"),
 		networkRadio,
 	)
 
-	// ── Step 3: Done ──────────────────────────────────────────────────────────
+// ── Step 3: Done ──────────────────────────────────────────────────────────
 	doneLabel := widget.NewLabel("")
 	doneLabel.TextStyle = fyne.TextStyle{Monospace: true}
 	doneLabel.Wrapping = fyne.TextWrapWord
@@ -291,6 +321,22 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		default:
 			cfg.Confirm = "destructive"
 		}
+		if v, err := strconv.Atoi(confirmTimeoutEntry.Text); err == nil && v > 0 {
+			cfg.ConfirmTimeout = v
+		}
+		if v, err := strconv.Atoi(maxTimeoutEntry.Text); err == nil && v > 0 {
+			cfg.MaxTimeout = v
+		}
+		cfg.SoundOnApproval = soundCheck.Checked
+		var regPaths []string
+		for _, line := range splitLines(pathsEntry.Text) {
+			if line != "" {
+				regPaths = append(regPaths, line)
+			}
+		}
+		if len(regPaths) > 0 {
+			cfg.AllowedPaths = regPaths
+		}
 		switch networkRadio.Selected {
 		case "Local only":
 			cfg.Network = "localhost"
@@ -299,8 +345,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		default:
 			cfg.Network = "all"
 		}
-
-		if err := localconfig.Save(cfg, configPath); err != nil {
+				if err := localconfig.Save(cfg, configPath); err != nil {
 			saveErr = err
 			dialog.ShowError(err, win)
 			return
