@@ -174,6 +174,24 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	win.Resize(fyne.NewSize(savedW, savedH))
 	win.SetFixedSize(false)
 
+	// Periodically persist the window size so it's restored on next launch.
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		var lastW, lastH float32
+		for range t.C {
+			if sw.win == nil {
+				return
+			}
+			s := sw.win.Canvas().Size()
+			if s.Width != lastW || s.Height != lastH {
+				lastW, lastH = s.Width, s.Height
+				a.Preferences().SetFloat("status.window.width", float64(s.Width))
+				a.Preferences().SetFloat("status.window.height", float64(s.Height))
+			}
+		}
+	}()
+
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()
@@ -354,7 +372,7 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	sw.logRich = widget.NewRichText()
 	sw.logRich.Wrapping = fyne.TextWrapOff
 
-	sw.logScroll = container.NewVScroll(sw.logRich)
+	sw.logScroll = container.NewScroll(sw.logRich)
 	sw.logScroll.SetMinSize(fyne.NewSize(460, 160))
 
 	termBodyBg := canvas.NewRectangle(colorTermBg)
