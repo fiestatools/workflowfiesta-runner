@@ -48,8 +48,8 @@ func Default() *LocalConfig {
 		AllowedPaths:    []string{"~/"},
 		Confirm:         "destructive",
 		Network:         "all",
-		MaxTimeout:      120,
-		ConfirmTimeout:  60,
+		MaxTimeout:      180,
+		ConfirmTimeout:  120,
 		SoundOnApproval: false,
 		BlockedPatterns: []string{
 			`rm\s+-rf\s+/`,
