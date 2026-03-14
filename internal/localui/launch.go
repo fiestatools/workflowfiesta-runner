@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -209,11 +210,51 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	)
 
 	// Step 1: Local permissions
+	defaultCfg1 := localconfig.Default()
+
+	// Allowed paths
+	pathsEntry1 := widget.NewMultiLineEntry()
+	pathsEntry1.SetPlaceHolder("One path per line, e.g.\n~/projects\n~/Documents:ro")
+	pathsEntry1.SetText("~/")
+	pathsEntry1.SetMinRowsVisible(3)
+	browseBtn1 := newButton("Browse…", func() {
+		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+			if err != nil || uri == nil {
+				return
+			}
+			current := pathsEntry1.Text
+			if current != "" && current[len(current)-1] != '\n' {
+				current += "\n"
+			}
+			pathsEntry1.SetText(current + uri.Path())
+		}, win)
+	})
+	pathHint1 := canvas.NewText("Append  :ro  for read-only access", colorLabel)
+	pathHint1.TextSize = 11
+
 	confirmRadio := widget.NewRadioGroup(
 		[]string{"Always (every job)", "Risky operations only (recommended)", "Never"},
 		nil,
 	)
 	confirmRadio.SetSelected("Risky operations only (recommended)")
+
+	// Confirm Timeout
+	confirmTimeoutEntry1 := widget.NewEntry()
+	confirmTimeoutEntry1.SetText(strconv.Itoa(defaultCfg1.ConfirmTimeout))
+	confirmTimeoutHint1 := makeHintText(
+		"How long (in seconds) to wait for your approval before cancelling the job. Default: 120 s.",
+	)
+
+	// Max Timeout
+	maxTimeoutEntry1 := widget.NewEntry()
+	maxTimeoutEntry1.SetText(strconv.Itoa(defaultCfg1.MaxTimeout))
+	maxTimeoutHint1 := makeHintText(
+		"Maximum time (in seconds) a single job is allowed to run. Jobs exceeding this limit are terminated. Default: 180 s.",
+	)
+
+	// Sound on approval
+	soundCheck1 := widget.NewCheck("Play a sound when an approval request arrives", nil)
+	soundCheck1.SetChecked(defaultCfg1.SoundOnApproval)
 
 	networkRadio := widget.NewRadioGroup(
 		[]string{"Allow all (recommended)", "Local only", "Block all"},
@@ -223,8 +264,17 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 
 	step1 := container.NewVBox(
 		makeStepHeading("Local Permissions", "Control what scripts can do on this machine."),
+		makeSectionLabel("Allowed Folders"),
+		pathsEntry1,
+		container.NewHBox(browseBtn1, container.NewWithoutLayout(pathHint1)),
+		widget.NewSeparator(),
 		makeSectionLabel("Approval Prompt"),
 		confirmRadio,
+		widget.NewSeparator(),
+		makeLabeledEntryWithHint("Confirm timeout (seconds)", confirmTimeoutEntry1, confirmTimeoutHint1),
+		makeLabeledEntryWithHint("Max timeout (seconds)", maxTimeoutEntry1, maxTimeoutHint1),
+		soundCheck1,
+		widget.NewSeparator(),
 		makeSectionLabel("Network Access"),
 		networkRadio,
 	)
@@ -268,6 +318,19 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		}
 
 		localCfg := localconfig.Default()
+
+		// Allowed paths
+		var paths []string
+		for _, line := range strings.Split(pathsEntry1.Text, "\n") {
+			if strings.TrimSpace(line) != "" {
+				paths = append(paths, strings.TrimSpace(line))
+			}
+		}
+		if len(paths) == 0 {
+			paths = []string{"~/"}
+		}
+		localCfg.AllowedPaths = paths
+
 		switch confirmRadio.Selected {
 		case "Always (every job)":
 			localCfg.Confirm = "always"
@@ -276,6 +339,13 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		default:
 			localCfg.Confirm = "destructive"
 		}
+		if v, err := strconv.Atoi(confirmTimeoutEntry1.Text); err == nil && v > 0 {
+			localCfg.ConfirmTimeout = v
+		}
+		if v, err := strconv.Atoi(maxTimeoutEntry1.Text); err == nil && v > 0 {
+			localCfg.MaxTimeout = v
+		}
+		localCfg.SoundOnApproval = soundCheck1.Checked
 		switch networkRadio.Selected {
 		case "Local only":
 			localCfg.Network = "localhost"
