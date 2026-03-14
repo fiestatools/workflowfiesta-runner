@@ -355,7 +355,7 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	sw.logRich.Wrapping = fyne.TextWrapOff
 
 	sw.logScroll = container.NewVScroll(sw.logRich)
-	sw.logScroll.SetMinSize(fyne.NewSize(460, 160))
+	sw.logScroll.SetMinSize(fyne.NewSize(0, 160))
 
 	termBodyBg := canvas.NewRectangle(colorTermBg)
 	termBodyBg.StrokeColor = colorBorder
