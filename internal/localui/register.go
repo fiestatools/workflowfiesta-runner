@@ -250,7 +250,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	networkRadio.SetSelected("Allow all (recommended)")
 
 	steps[2] = container.NewVBox(
-		makeStepHeading("Local Permissions", "Control what scripts can access and whether you\'re prompted for approval."),
+		makeStepHeading("Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
 		makeSectionLabel("Folder Access"),
 		pathsEntry,
 		container.NewWithoutLayout(pathHint),
