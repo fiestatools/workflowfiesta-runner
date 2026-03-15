@@ -28,7 +28,7 @@ func RunWizard(configPath string) error {
 
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta · Setup")
-	win.Resize(fyne.NewSize(520, 520))
+	win.Resize(fyne.NewSize(520, 600))
 	win.CenterOnScreen()
 
 	cfg := localconfig.Default()
@@ -295,7 +295,7 @@ func RunWizard(configPath string) error {
 	navArea := container.NewStack(navBg, container.NewPadded(navRow))
 
 	win.SetContent(container.NewBorder(dotsHeader, navArea, nil, nil,
-		container.NewPadded(bodyHolder),
+		container.NewPadded(container.NewVScroll(bodyHolder)),
 	))
 
 	showStep(0)

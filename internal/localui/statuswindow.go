@@ -174,6 +174,30 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	win.Resize(fyne.NewSize(savedW, savedH))
 	win.SetFixedSize(false)
 
+	// Persist window size after the user manually resizes it.
+	// Poll every second; write prefs only after 3 consecutive stable readings
+	// to avoid spurious saves during content-triggered reflows.
+	go func() {
+		var prevW, prevH float32
+		var stable int
+		sizeTicker := time.NewTicker(time.Second)
+		defer sizeTicker.Stop()
+		for range sizeTicker.C {
+			fyne.Do(func() {
+				sz := win.Canvas().Size()
+				if sz.Width == prevW && sz.Height == prevH {
+					stable++
+					if stable == 3 {
+						a.Preferences().SetFloat("status.window.width", float64(sz.Width))
+						a.Preferences().SetFloat("status.window.height", float64(sz.Height))
+					}
+				} else {
+					prevW, prevH = sz.Width, sz.Height
+					stable = 0
+				}
+			})
+		}
+	}()
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()
@@ -354,8 +378,8 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	sw.logRich = widget.NewRichText()
 	sw.logRich.Wrapping = fyne.TextWrapOff
 
-	sw.logScroll = container.NewVScroll(sw.logRich)
-	sw.logScroll.SetMinSize(fyne.NewSize(460, 160))
+	sw.logScroll = container.NewScroll(sw.logRich)
+	sw.logScroll.SetMinSize(fyne.NewSize(0, 160))
 
 	termBodyBg := canvas.NewRectangle(colorTermBg)
 	termBodyBg.StrokeColor = colorBorder
