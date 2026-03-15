@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -216,11 +217,55 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	)
 
 	// ── Step 2: Local config ──────────────────────────────────────────────────
+	cfgDefaults := localconfig.Default()
+
 	confirmRadio := widget.NewRadioGroup(
 		[]string{"Always (every job)", "Risky operations only (recommended)", "Never"},
 		nil,
 	)
 	confirmRadio.SetSelected("Risky operations only (recommended)")
+
+	// Confirm Timeout
+	confirmTimeoutEntry := widget.NewEntry()
+	confirmTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.ConfirmTimeout))
+	confirmTimeoutHint := canvas.NewText(
+		"Seconds to wait for your approval before cancelling the job (default: 120 s).",
+		colorLabel,
+	)
+	confirmTimeoutHint.TextSize = 10
+
+	// Max Timeout
+	maxTimeoutEntry := widget.NewEntry()
+	maxTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.MaxTimeout))
+	maxTimeoutHint := canvas.NewText(
+		"Maximum time (in seconds) a single job may run before being terminated (default: 180 s).",
+		colorLabel,
+	)
+	maxTimeoutHint.TextSize = 10
+
+	// Sound on approval
+	soundCheck := widget.NewCheck("Play a sound when an approval request arrives", nil)
+	soundCheck.SetChecked(cfgDefaults.SoundOnApproval)
+
+	// Allowed paths
+	pathsEntry := widget.NewMultiLineEntry()
+	pathsEntry.SetPlaceHolder("One path per line, e.g.\n~/projects\n~/Documents:ro")
+	pathsEntry.SetText("~/")
+	pathsEntry.SetMinRowsVisible(3)
+	browseBtn := newButton("Browse…", func() {
+		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+			if err != nil || uri == nil {
+				return
+			}
+			current := pathsEntry.Text
+			if current != "" && current[len(current)-1] != '\n' {
+				current += "\n"
+			}
+			pathsEntry.SetText(current + uri.Path())
+		}, win)
+	})
+	pathHint := canvas.NewText("Append :ro for read-only access.", colorLabel)
+	pathHint.TextSize = 10
 
 	networkRadio := widget.NewRadioGroup(
 		[]string{"Allow all (recommended)", "Local only", "Block all"},
@@ -230,8 +275,16 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 
 	steps[2] = container.NewVBox(
 		makeStepHeading("Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
+		makeSectionLabel("Folder Access"),
+		pathsEntry,
+		container.NewHBox(browseBtn, container.NewWithoutLayout(pathHint)),
+		widget.NewSeparator(),
 		makeSectionLabel("Approval Prompt"),
 		confirmRadio,
+		makeLabeledEntryWithHint2("Confirm timeout (s)", confirmTimeoutEntry, confirmTimeoutHint),
+		makeLabeledEntryWithHint2("Max timeout (s)", maxTimeoutEntry, maxTimeoutHint),
+		soundCheck,
+		widget.NewSeparator(),
 		makeSectionLabel("Network Access"),
 		networkRadio,
 	)
@@ -291,6 +344,29 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		default:
 			cfg.Confirm = "destructive"
 		}
+
+		// Parse confirm timeout
+		if v, err := strconv.Atoi(confirmTimeoutEntry.Text); err == nil && v > 0 {
+			cfg.ConfirmTimeout = v
+		}
+		// Parse max timeout
+		if v, err := strconv.Atoi(maxTimeoutEntry.Text); err == nil && v > 0 {
+			cfg.MaxTimeout = v
+		}
+
+		cfg.SoundOnApproval = soundCheck.Checked
+
+		// Parse allowed paths
+		var paths []string
+		for _, line := range strings.Split(pathsEntry.Text, "\n") {
+			if strings.TrimSpace(line) != "" {
+				paths = append(paths, strings.TrimSpace(line))
+			}
+		}
+		if len(paths) > 0 {
+			cfg.AllowedPaths = paths
+		}
+
 		switch networkRadio.Selected {
 		case "Local only":
 			cfg.Network = "localhost"
@@ -385,6 +461,18 @@ func makeSectionLabel(text string) fyne.CanvasObject {
 	lbl.TextSize = 10
 	lbl.TextStyle = fyne.TextStyle{Bold: true}
 	return container.NewPadded(container.NewWithoutLayout(lbl))
+}
+
+// makeLabeledEntryWithHint2 creates a labeled entry with a small hint text below.
+func makeLabeledEntryWithHint2(label string, entry *widget.Entry, hint *canvas.Text) fyne.CanvasObject {
+	lbl := canvas.NewText(strings.ToUpper(label), colorLabel)
+	lbl.TextSize = 10
+	lbl.TextStyle = fyne.TextStyle{Bold: true}
+	return container.NewVBox(
+		container.NewWithoutLayout(lbl),
+		entry,
+		container.NewWithoutLayout(hint),
+	)
 }
 
 // callRegisterAPI posts to /api/runners/register and returns the result.
