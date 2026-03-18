@@ -162,7 +162,14 @@ func (c *Client) Listen(ctx context.Context, jobChan chan<- Job) {
 		if msgType == "job" {
 			var job Job
 			if err := json.Unmarshal(msg, &job); err == nil {
-				jobChan <- job
+				// Non-blocking send: if the job buffer is full, prefer dropping
+				// the duplicate dispatch over freezing the WebSocket read loop
+				// (which would cause missed pong frames → connection closure).
+				select {
+				case jobChan <- job:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}

@@ -76,13 +76,18 @@ func (d *dockerExecutor) Execute(ctx context.Context, input Input) (int, error) 
 	if err != nil {
 		return -1, fmt.Errorf("container logs: %w", err)
 	}
-	defer out.Close()
+	// NOTE: out is closed manually below (not deferred) so we can synchronize
+	// with the streaming goroutine before returning.
 
-	// Stream output in goroutine
+	// Stream output in goroutine. We track when it exits so Execute() can wait
+	// for it before returning — this prevents a panic when the caller closes
+	// the output channel while this goroutine is still trying to send.
+	streamDone := make(chan struct{})
 	go func() {
+		defer close(streamDone)
 		buf := make([]byte, 4096)
 		for {
-			n, err := out.Read(buf)
+			n, readErr := out.Read(buf)
 			if n > 0 && input.OutputChan != nil {
 				data := buf[:n]
 				if len(data) > 8 {
@@ -90,8 +95,8 @@ func (d *dockerExecutor) Execute(ctx context.Context, input Input) (int, error) 
 				}
 				input.OutputChan <- string(data)
 			}
-			if err != nil {
-				break
+			if readErr != nil {
+				return
 			}
 		}
 	}()
@@ -100,13 +105,22 @@ func (d *dockerExecutor) Execute(ctx context.Context, input Input) (int, error) 
 	defer cancel()
 
 	statusCh, errCh := cli.ContainerWait(timeoutCtx, resp.ID, container.WaitConditionNotRunning)
+	var exitCode int
+	var execErr error
 	select {
 	case status := <-statusCh:
-		return int(status.StatusCode), nil
+		exitCode = int(status.StatusCode)
 	case err := <-errCh:
-		return -1, fmt.Errorf("container wait: %w", err)
+		execErr = fmt.Errorf("container wait: %w", err)
 	case <-timeoutCtx.Done():
 		cli.ContainerStop(context.Background(), resp.ID, container.StopOptions{})
-		return -1, fmt.Errorf("timeout after %v", input.Timeout)
+		execErr = fmt.Errorf("timeout after %v", input.Timeout)
 	}
+
+	// Close the log stream to unblock the goroutine's Read, then wait for it
+	// to finish. This guarantees the goroutine never touches OutputChan after
+	// we return, so the caller can safely close it without a panic.
+	out.Close()
+	<-streamDone
+	return exitCode, execErr
 }
