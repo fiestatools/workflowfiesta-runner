@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"workflowfiesta-runner/internal/localconfig"
@@ -21,6 +22,7 @@ type Config struct {
 	KubeImagePullSecret string // KUBERNETES_IMAGE_PULL_SECRET
 	LocalConfigPath     string // path to runner.yaml (local executor only)
 	LocalConfig         *localconfig.LocalConfig // loaded local config (set by run-local)
+	MaxConcurrentJobs   int    // max simultaneous jobs (0 → default 4)
 }
 
 // CredentialsFilePath returns the path to the auto-saved credentials file.
@@ -89,6 +91,13 @@ func Load() *Config {
 		localConfigPath = localconfig.DefaultPath()
 	}
 
+	maxConcurrentJobs := 4
+	if raw := os.Getenv("WORKFLOWFIESTA_MAX_CONCURRENT_JOBS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			maxConcurrentJobs = n
+		}
+	}
+
 	cfg := &Config{
 		APIURL:              getEnv("WORKFLOWFIESTA_API_URL", "http://localhost:3001"),
 		Token:               os.Getenv("WORKFLOWFIESTA_TOKEN"),
@@ -100,6 +109,7 @@ func Load() *Config {
 		KubeNamespace:       getEnv("KUBERNETES_NAMESPACE", "default"),
 		KubeImagePullSecret: os.Getenv("KUBERNETES_IMAGE_PULL_SECRET"),
 		LocalConfigPath:     localConfigPath,
+		MaxConcurrentJobs:   maxConcurrentJobs,
 	}
 
 	// Fall back to the saved credentials file if no token was found in env vars.

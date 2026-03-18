@@ -23,19 +23,26 @@ type StatusSink interface {
 }
 
 type Runner struct {
-	cfg      *config.Config
-	client   *api.Client
-	executor executor.Executor
-	sinks    []StatusSink
+	cfg        *config.Config
+	client     *api.Client
+	executor   executor.Executor
+	sinks      []StatusSink
+	activeJobs sync.Map     // jobID -> struct{}: deduplicates re-dispatched jobs
+	semaphore  chan struct{} // limits concurrent job executions
 }
 
 func New(cfg *config.Config) *Runner {
 	apiURL := cfg.APIURL
 	client := api.New(apiURL, cfg.Token)
+	maxJobs := cfg.MaxConcurrentJobs
+	if maxJobs <= 0 {
+		maxJobs = 4
+	}
 	return &Runner{
-		cfg:      cfg,
-		client:   client,
-		executor: executor.NewWithClient(cfg, client),
+		cfg:       cfg,
+		client:    client,
+		executor:  executor.NewWithClient(cfg, client),
+		semaphore: make(chan struct{}, maxJobs),
 	}
 }
 
@@ -76,9 +83,21 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.notify(func(s StatusSink) { s.SetConnected(false) })
 			return ctx.Err()
 		case job := <-jobChan:
+			if _, loaded := r.activeJobs.LoadOrStore(job.JobID, struct{}{}); loaded {
+				log.Infof("Skipping duplicate dispatch of job %s (already running)", job.JobID)
+				continue
+			}
 			wg.Add(1)
 			go func(j api.Job) {
 				defer wg.Done()
+				defer r.activeJobs.Delete(j.JobID)
+				// Acquire concurrency slot before executing
+				select {
+				case r.semaphore <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+				defer func() { <-r.semaphore }()
 				r.handleJob(ctx, j)
 			}(job)
 		}
