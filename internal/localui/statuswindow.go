@@ -376,7 +376,7 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	termHeader := container.NewStack(termHeaderBg, container.NewPadded(termHeaderRow))
 
 	sw.logRich = widget.NewRichText()
-	sw.logRich.Wrapping = fyne.TextWrapOff
+	sw.logRich.Wrapping = fyne.TextWrapWord
 
 	sw.logScroll = container.NewScroll(sw.logRich)
 	sw.logScroll.SetMinSize(fyne.NewSize(0, 160))
