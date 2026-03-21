@@ -188,6 +188,11 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 			if err := r.client.SendHeartbeat(); err != nil {
 				log.Warnf("Heartbeat failed: %v", err)
 			}
+			// WebSocket-level ping so the server's auto-pong resets our read
+			// deadline. This detects silent TCP drops within ~75s.
+			if err := r.client.SendPing(); err != nil {
+				log.Warnf("Ping failed: %v", err)
+			}
 		}
 	}
 }

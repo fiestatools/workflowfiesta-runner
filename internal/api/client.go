@@ -15,6 +15,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	// pongWait is how long we wait for a pong before considering the connection dead.
+	pongWait = 75 * time.Second
+	// writeWait is the timeout for a single WebSocket write.
+	writeWait = 10 * time.Second
+)
+
 type Job struct {
 	JobID          string            `json:"jobId"`
 	DockerImage    string            `json:"dockerImage"`
@@ -56,6 +63,17 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	log.Infof("[ws] connection established")
+
+	// Set initial read deadline and a pong handler that refreshes it.
+	// This lets us detect silent TCP drops: if no pong arrives within pongWait
+	// after a ping, ReadMessage() will return a deadline-exceeded error and
+	// the Listen() loop will reconnect.
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
@@ -92,6 +110,19 @@ func (c *Client) ConnectWithRetry(ctx context.Context) {
 
 func (c *Client) SendHeartbeat() error {
 	return c.send(map[string]string{"type": "heartbeat"})
+}
+
+// SendPing sends a WebSocket-level PING frame. The server (ws npm library)
+// automatically responds with a PONG, which resets our read deadline via
+// the pong handler set in Connect(). Call this alongside SendHeartbeat to
+// detect silent TCP drops quickly.
+func (c *Client) SendPing() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == nil {
+		return fmt.Errorf("not connected")
+	}
+	return c.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(writeWait))
 }
 
 func (c *Client) ReportJobClaimed(jobID string) error {
@@ -199,5 +230,11 @@ func (c *Client) send(v interface{}) error {
 	if err != nil {
 		return err
 	}
-	return c.conn.WriteMessage(websocket.TextMessage, data)
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		// Nil out the connection so Listen() detects the failure on its next
+		// ReadMessage() deadline expiry and triggers a reconnect.
+		c.conn = nil
+		return err
+	}
+	return nil
 }
