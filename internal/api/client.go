@@ -49,11 +49,13 @@ func (c *Client) Connect(ctx context.Context) error {
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+c.token)
 
+	log.Infof("[ws] connecting to %s", wsURL)
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, u.String(), header)
 	if err != nil {
 		return fmt.Errorf("websocket dial: %w", err)
 	}
 
+	log.Infof("[ws] connection established")
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
@@ -78,7 +80,7 @@ func (c *Client) ConnectWithRetry(ctx context.Context) {
 
 		attempt++
 		delay := time.Duration(math.Min(float64(attempt)*2, 30)) * time.Second
-		log.Warnf("Connection failed (attempt %d): %v, retrying in %v", attempt, err, delay)
+		log.Warnf("[ws] connection failed (attempt %d): %v, retrying in %v", attempt, err, delay)
 
 		select {
 		case <-ctx.Done():
@@ -141,9 +143,9 @@ func (c *Client) Listen(ctx context.Context, jobChan chan<- Job) {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			if closeErr, ok := err.(*websocket.CloseError); ok && (closeErr.Code == 4001 || closeErr.Code == 4003) {
-				log.Fatalf("Runner authentication failed (code %d: %s). Check your WORKFLOWFIESTA_TOKEN and re-register the runner.", closeErr.Code, closeErr.Text)
+				log.Fatalf("[ws] authentication failed (code %d: %s). Check your WORKFLOWFIESTA_TOKEN and re-register the runner.", closeErr.Code, closeErr.Text)
 			}
-			log.Warnf("WebSocket read error: %v", err)
+			log.Warnf("[ws] read error (will reconnect): %v", err)
 			c.mu.Lock()
 			c.conn = nil
 			c.mu.Unlock()

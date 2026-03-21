@@ -149,6 +149,10 @@ var runCmd = &cobra.Command{
 		log.Infof("Starting WorkflowFiesta runner (version %s)", version)
 		log.Infof("API URL: %s", cfg.APIURL)
 		log.Infof("Runner name: %s", cfg.Name)
+		log.Infof("Executor type: %s", cfg.ExecutorType)
+		if cfg.ExecutorType == "docker" {
+			log.Infof("Docker socket: %s", cfg.DockerSocket)
+		}
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -250,6 +254,7 @@ var runLocalCmd = &cobra.Command{
 		log.Infof("API URL: %s", cfg.APIURL)
 		log.Infof("Runner name: %s", cfg.Name)
 		log.Infof("Allowed paths: %v", localCfg.AllowedPaths)
+		log.Infof("Working dir: %s", localCfg.WorkingDir())
 		log.Infof("Confirm: %s  Network: %s  Sandbox: %s", localCfg.Confirm, localCfg.Network, localCfg.Sandbox)
 
 		ctx, cancel := context.WithCancel(context.Background())

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sync"
 	"time"
 
@@ -114,6 +115,7 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 
 	// Layer 2: Confirmation gate.
 	if e.needsConfirmation(input.Script) {
+		log.Infof("[local] job %s requires approval (confirm=%s)", input.JobID, e.localCfg.Confirm)
 		if e.apiClient != nil {
 			_ = e.apiClient.ReportApprovalPending(input.JobID, e.localCfg.RunnerName)
 		}
@@ -132,8 +134,10 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 				},
 			},
 		})
+		log.Infof("[local] job %s approval result: %v", input.JobID, result)
 		switch result {
 		case localui.ApprovalDeny:
+			log.Warnf("[local] job %s denied by local operator", input.JobID)
 			e.writeAudit(auditEntry{
 				Time:     start.UTC().Format(time.RFC3339),
 				JobID:    input.JobID,
@@ -173,13 +177,17 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	// CWD = first writable allowed path.
 	cwd := e.localCfg.WorkingDir()
 
-	// Wrap script with ulimit resource caps.
-	script := e.wrapWithLimits(input.Script)
+	// Wrap script with ulimit resource caps (Unix only; ulimit is not available on Windows).
+	script := input.Script
+	if runtime.GOOS != "windows" {
+		script = e.wrapWithLimits(input.Script)
+	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout+5*time.Second)
 	defer cancel()
 
-	log.Infof("[local] running job %s (timeout=%v, sandbox=%s)", input.JobID, timeout, e.localCfg.Sandbox)
+	log.Infof("[local] running job %s (timeout=%v, sandbox=%s, cwd=%s)", input.JobID, timeout, e.localCfg.Sandbox, cwd)
+	log.Debugf("[local] effective PATH: %s", e.effectivePATH())
 
 	exitCode, runErr := runWithSandbox(timeoutCtx, e.localCfg, script, env, cwd, input.OutputChan)
 
@@ -244,13 +252,30 @@ func (e *localExecutor) needsConfirmation(script string) bool {
 	}
 }
 
+// effectivePATH returns the platform-appropriate default PATH for local scripts.
+func (e *localExecutor) effectivePATH() string {
+	if runtime.GOOS == "darwin" {
+		// Apple Silicon (M1/M2) Homebrew installs to /opt/homebrew; Intel uses /usr/local.
+		// Include both so scripts find Homebrew-installed tools on either architecture.
+		return "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	}
+	if runtime.GOOS == "windows" {
+		// On Windows, inherit the system PATH so scripts can find installed tools.
+		if p := os.Getenv("PATH"); p != "" {
+			return p
+		}
+		return `C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem`
+	}
+	return "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+}
+
 // buildEnv constructs a minimal, safe environment for the subprocess.
 // Dangerous loader variables are stripped; job-provided vars are merged on top.
 func (e *localExecutor) buildEnv(jobEnvVars map[string]string) []string {
 	home := e.localCfg.WorkingDir()
 
 	env := []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"PATH=" + e.effectivePATH(),
 		"HOME=" + home,
 		"TERM=xterm-256color",
 		"LANG=en_US.UTF-8",
