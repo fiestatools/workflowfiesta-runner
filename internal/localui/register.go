@@ -273,6 +273,63 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	)
 	networkRadio.SetSelected("Allow all (recommended)")
 
+	// ── Advanced Options (accordion, collapsed by default) ────────────────────
+	sandboxRadio := widget.NewRadioGroup(
+		[]string{"None (disabled)", "Kernel (Landlock, Linux 5.13+)"},
+		nil,
+	)
+	sandboxRadio.SetSelected("None (disabled)")
+	sandboxHint := canvas.NewText("Kernel sandbox restricts filesystem access at the OS level. Linux only.", colorMuted)
+	sandboxHint.TextSize = 10
+
+	auditLogEntry := widget.NewEntry()
+	auditLogEntry.SetText(cfgDefaults.AuditLog)
+	auditLogEntry.SetPlaceHolder("/path/to/audit.log (leave blank to disable)")
+	auditLogHint := canvas.NewText("Append a line to this file for every script that runs.", colorMuted)
+	auditLogHint.TextSize = 10
+
+	blockedEntry := widget.NewMultiLineEntry()
+	blockedEntry.SetPlaceHolder("One regex pattern per line, e.g.  rm\\s+-rf\\s+/")
+	blockedEntry.SetText(strings.Join(cfgDefaults.BlockedPatterns, "\n"))
+	blockedEntry.SetMinRowsVisible(4)
+	blockedHint := canvas.NewText("Scripts matching these patterns will be flagged in the approval dialog.", colorMuted)
+	blockedHint.TextSize = 10
+
+	alwaysAllowedEntry := widget.NewMultiLineEntry()
+	alwaysAllowedEntry.SetPlaceHolder("Patterns auto-approved without a prompt (one regex per line)")
+	alwaysAllowedEntry.SetMinRowsVisible(3)
+	alwaysAllowedHint := canvas.NewText("Scripts matching these patterns are never shown in the approval dialog.", colorMuted)
+	alwaysAllowedHint.TextSize = 10
+
+	environmentIDEntry := widget.NewEntry()
+	environmentIDEntry.SetPlaceHolder("Leave blank — a new environment is auto-created on registration")
+	envIDHint := canvas.NewText("UUID of an existing environment to attach this runner to.", colorMuted)
+	envIDHint.TextSize = 10
+
+	advancedContent := container.NewVBox(
+		makeSectionLabel("Sandbox"),
+		sandboxRadio,
+		container.NewWithoutLayout(sandboxHint),
+		widget.NewSeparator(),
+		makeLabeledEntryWithHint2("Audit Log Path", auditLogEntry, auditLogHint),
+		widget.NewSeparator(),
+		makeSectionLabel("Blocked Patterns"),
+		blockedEntry,
+		container.NewWithoutLayout(blockedHint),
+		widget.NewSeparator(),
+		makeSectionLabel("Always-Approved Patterns"),
+		alwaysAllowedEntry,
+		container.NewWithoutLayout(alwaysAllowedHint),
+		widget.NewSeparator(),
+		makeSectionLabel("Environment ID (override)"),
+		environmentIDEntry,
+		container.NewWithoutLayout(envIDHint),
+	)
+	advancedAccordion := widget.NewAccordion(
+		widget.NewAccordionItem("Advanced Options", advancedContent),
+	)
+	// Collapsed by default — do not call advancedAccordion.Open(0)
+
 	steps[2] = container.NewVBox(
 		makeStepHeading("Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
 		makeSectionLabel("Folder Access"),
@@ -287,6 +344,8 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		widget.NewSeparator(),
 		makeSectionLabel("Network Access"),
 		networkRadio,
+		widget.NewSeparator(),
+		advancedAccordion,
 	)
 
 	// ── Step 3: Review & Save ─────────────────────────────────────────────────
@@ -325,14 +384,44 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 			if soundCheck.Checked {
 				soundStr = "on"
 			}
+			// Advanced fields summary (only show non-default values)
+			advancedLines := ""
+			if sandboxRadio.Selected == "Kernel (Landlock, Linux 5.13+)" {
+				advancedLines += "\nSandbox:           kernel"
+			}
+			if v := strings.TrimSpace(auditLogEntry.Text); v != "" && v != cfgDefaults.AuditLog {
+				advancedLines += "\nAudit log:         " + v
+			}
+			blockedCount := 0
+			for _, line := range strings.Split(blockedEntry.Text, "\n") {
+				if strings.TrimSpace(line) != "" {
+					blockedCount++
+				}
+			}
+			if blockedCount > 0 {
+				advancedLines += fmt.Sprintf("\nBlocked patterns:  %d", blockedCount)
+			}
+			alwaysCount := 0
+			for _, line := range strings.Split(alwaysAllowedEntry.Text, "\n") {
+				if strings.TrimSpace(line) != "" {
+					alwaysCount++
+				}
+			}
+			if alwaysCount > 0 {
+				advancedLines += fmt.Sprintf("\nAuto-approved:     %d patterns", alwaysCount)
+			}
+			if v := strings.TrimSpace(environmentIDEntry.Text); v != "" {
+				advancedLines += "\nEnvironment ID:    " + v
+			}
 			summaryLabel.SetText(fmt.Sprintf(
-				"Allowed paths:\n%s\n\nApproval:          %s\nConfirm timeout:   %s s\nMax timeout:       %s s\nSound on approval: %s\nNetwork:           %s",
+				"Allowed paths:\n%s\n\nApproval:          %s\nConfirm timeout:   %s s\nMax timeout:       %s s\nSound on approval: %s\nNetwork:           %s%s",
 				pathsEntry.Text,
 				confirmRadio.Selected,
 				confirmTimeoutEntry.Text,
 				maxTimeoutEntry.Text,
 				soundStr,
 				networkRadio.Selected,
+				advancedLines,
 			))
 		}
 		if currentStep < numSteps-1 {
@@ -390,6 +479,33 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 			cfg.Network = "none"
 		default:
 			cfg.Network = "all"
+		}
+
+		// Advanced options
+		if sandboxRadio.Selected == "Kernel (Landlock, Linux 5.13+)" {
+			cfg.Sandbox = "kernel"
+		} else {
+			cfg.Sandbox = "none"
+		}
+		if v := strings.TrimSpace(auditLogEntry.Text); v != "" {
+			cfg.AuditLog = v
+		}
+		var blocked []string
+		for _, line := range strings.Split(blockedEntry.Text, "\n") {
+			if strings.TrimSpace(line) != "" {
+				blocked = append(blocked, strings.TrimSpace(line))
+			}
+		}
+		cfg.BlockedPatterns = blocked
+		var alwaysAllowed []string
+		for _, line := range strings.Split(alwaysAllowedEntry.Text, "\n") {
+			if strings.TrimSpace(line) != "" {
+				alwaysAllowed = append(alwaysAllowed, strings.TrimSpace(line))
+			}
+		}
+		cfg.AlwaysAllowedPatterns = alwaysAllowed
+		if v := strings.TrimSpace(environmentIDEntry.Text); v != "" {
+			cfg.EnvironmentID = v
 		}
 
 		if err := localconfig.Save(cfg, configPath); err != nil {
