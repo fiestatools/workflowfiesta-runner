@@ -117,9 +117,9 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		dotsRow.Objects = objs
 		dotsRow.Refresh()
 
-		backBtn.Hidden = (n == 0 || n == 3)
-		nextBtn.Hidden = (n != 1)
-		saveBtn.Hidden = (n != 2)
+		backBtn.Hidden = (n == 0 || n == numSteps-1)
+		nextBtn.Hidden = (n == 0 || n == numSteps-1)
+		saveBtn.Hidden = (n != numSteps-1)
 		backBtn.Refresh()
 		nextBtn.Refresh()
 		saveBtn.Refresh()
@@ -289,27 +289,27 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		networkRadio,
 	)
 
-	// ── Step 3: Done ──────────────────────────────────────────────────────────
-	doneLabel := widget.NewLabel("")
-	doneLabel.TextStyle = fyne.TextStyle{Monospace: true}
-	doneLabel.Wrapping = fyne.TextWrapWord
-	doneBg := canvas.NewRectangle(colorTermBg)
-	doneBg.CornerRadius = 4
-	doneBg.StrokeColor = colorBorder
-	doneBg.StrokeWidth = 1
-	doneBlock := container.NewStack(doneBg, container.NewPadded(doneLabel))
+	// ── Step 3: Review & Save ─────────────────────────────────────────────────
+	summaryLabel := widget.NewLabel("")
+	summaryLabel.Wrapping = fyne.TextWrapWord
+	summaryBg := canvas.NewRectangle(colorTermBg)
+	summaryBg.CornerRadius = 4
+	summaryBg.StrokeColor = colorBorder
+	summaryBg.StrokeWidth = 1
+	summaryBlock := container.NewStack(summaryBg, container.NewPadded(summaryLabel))
 
-	alertLabel := canvas.NewText("Keep credentials.env private — it contains your runner token.", colorAmber)
-	alertLabel.TextSize = 11
+	savedText := canvas.NewText("", colorSuccess)
+	savedText.TextSize = 11
+	savedBox := container.NewWithoutLayout(savedText)
 
-	closeBtn := newButton("Close", func() { win.Close() })
+	closeBtnInner := newButton("Close", func() { win.Close() })
+	closeBtnInner.Hidden = true
 
 	steps[3] = container.NewVBox(
-		makeStepHeading("All Set! 🎉", "Your runner is configured and ready to start."),
-		makeSectionLabel("Start with:"),
-		doneBlock,
-		container.NewWithoutLayout(alertLabel),
-		container.NewPadded(closeBtn),
+		makeStepHeading("Review & Confirm", "Check your settings, then click Save & Start."),
+		summaryBlock,
+		savedBox,
+		container.NewPadded(closeBtnInner),
 	)
 
 	// ── navigation wiring ─────────────────────────────────────────────────────
@@ -318,6 +318,22 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 			tokenDisplay.SetText(regResult.Token)
 			runnerIDDisplay.Text = "Runner ID: " + regResult.RunnerID
 			runnerIDDisplay.Refresh()
+		}
+		if currentStep == 2 {
+			// Populate the review summary before showing step 3
+			soundStr := "off"
+			if soundCheck.Checked {
+				soundStr = "on"
+			}
+			summaryLabel.SetText(fmt.Sprintf(
+				"Allowed paths:\n%s\n\nApproval:          %s\nConfirm timeout:   %s s\nMax timeout:       %s s\nSound on approval: %s\nNetwork:           %s",
+				pathsEntry.Text,
+				confirmRadio.Selected,
+				confirmTimeoutEntry.Text,
+				maxTimeoutEntry.Text,
+				soundStr,
+				networkRadio.Selected,
+			))
 		}
 		if currentStep < numSteps-1 {
 			show(currentStep + 1)
@@ -388,8 +404,13 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 			return
 		}
 
-		doneLabel.SetText(fmt.Sprintf("Credentials saved to:\n%s\n\nDouble-click the app any time to start the runner.", credPath))
-		show(3)
+		// Update review screen in-place to show success state
+		savedText.Text = "✓ Saved to " + credPath + " — double-click the app any time to start."
+		savedText.Refresh()
+		saveBtn.Hide()
+		saveBtn.Refresh()
+		closeBtnInner.Hidden = false
+		closeBtnInner.Refresh()
 	}
 
 	// ── layout ────────────────────────────────────────────────────────────────
@@ -403,9 +424,9 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		refreshDots(n)
 		bodyHolder.Objects = []fyne.CanvasObject{steps[n]}
 		bodyHolder.Refresh()
-		backBtn.Hidden = (n == 0 || n == 3)
-		nextBtn.Hidden = (n != 1)
-		saveBtn.Hidden = (n != 2)
+		backBtn.Hidden = (n == 0 || n == numSteps-1)
+		nextBtn.Hidden = (n == 0 || n == numSteps-1)
+		saveBtn.Hidden = (n != numSteps-1)
 		backBtn.Refresh()
 		nextBtn.Refresh()
 		saveBtn.Refresh()
