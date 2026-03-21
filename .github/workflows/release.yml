@@ -8,29 +8,17 @@ permissions:
   contents: write   # required to upload release assets
 
 jobs:
-  build:
-    name: Build release artifacts
-    runs-on: ubuntu-latest
+  # ── parallel builds ─────────────────────────────────────────────────────────
 
+  build-linux-headless:
+    name: Linux headless (amd64)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            libgl1-mesa-dev xorg-dev \
-            gcc-mingw-w64-x86-64
-
-      - name: Create dist directory
-        run: mkdir -p dist
-
-      # ── Linux headless ────────────────────────────────────────────────────
-      - name: Build Linux headless (amd64)
+      - name: Build
         env:
           CGO_ENABLED: "0"
           GOOS: linux
@@ -38,11 +26,26 @@ jobs:
         run: |
           go build -tags nolocalui \
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
-            -o dist/workflowfiesta-runner-linux-amd64 \
+            -o workflowfiesta-runner-linux-amd64 \
             ./cmd/runner
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-headless
+          path: workflowfiesta-runner-linux-amd64
 
-      # ── Linux GUI ─────────────────────────────────────────────────────────
-      - name: Build Linux GUI (amd64)
+  build-linux-gui:
+    name: Linux GUI (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install Fyne build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev
+      - name: Build
         env:
           CGO_ENABLED: "1"
           GOOS: linux
@@ -50,11 +53,22 @@ jobs:
         run: |
           go build \
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
-            -o dist/workflowfiesta-runner-linux-amd64-gui \
+            -o workflowfiesta-runner-linux-amd64-gui \
             ./cmd/runner
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-gui
+          path: workflowfiesta-runner-linux-amd64-gui
 
-      # ── Windows headless ─────────────────────────────────────────────────
-      - name: Build Windows headless (amd64)
+  build-windows-headless:
+    name: Windows headless (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build
         env:
           CGO_ENABLED: "0"
           GOOS: windows
@@ -62,11 +76,26 @@ jobs:
         run: |
           go build -tags nolocalui \
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
-            -o dist/workflowfiesta-runner-windows-amd64.exe \
+            -o workflowfiesta-runner-windows-amd64.exe \
             ./cmd/runner
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-headless
+          path: workflowfiesta-runner-windows-amd64.exe
 
-      # ── Windows GUI ───────────────────────────────────────────────────────
-      - name: Build Windows GUI (amd64)
+  build-windows-gui:
+    name: Windows GUI (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install Windows cross-compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+      - name: Build
         env:
           CGO_ENABLED: "1"
           CC: x86_64-w64-mingw32-gcc
@@ -75,15 +104,33 @@ jobs:
         run: |
           go build \
             -ldflags "-s -w -H windowsgui -X main.version=${{ github.ref_name }}" \
-            -o dist/workflowfiesta-runner-windows-amd64-gui.exe \
+            -o workflowfiesta-runner-windows-amd64-gui.exe \
             ./cmd/runner
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-gui
+          path: workflowfiesta-runner-windows-amd64-gui.exe
 
-      # ── Checksums ─────────────────────────────────────────────────────────
+  # ── publish ─────────────────────────────────────────────────────────────────
+
+  publish:
+    name: Publish release assets
+    needs:
+      - build-linux-headless
+      - build-linux-gui
+      - build-windows-headless
+      - build-windows-gui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Generate checksums
         working-directory: dist
         run: sha256sum * > checksums.txt
 
-      # ── Upload to release ─────────────────────────────────────────────────
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:

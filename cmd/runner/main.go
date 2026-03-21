@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -364,9 +365,26 @@ func init() {
 func main() {
 	log.SetFormatter(&darkFormatter{})
 
-	// No arguments: user double-clicked the app. Skip the CLI entirely and
-	// go straight to the GUI launcher (first-run wizard or status window).
+	// No arguments: user double-clicked the binary.
 	if len(os.Args) == 1 {
+		if !localui.HasGUI {
+			// Headless build has no wizard. Print a helpful message and pause
+			// so the console window doesn't disappear before the user can read it.
+			fmt.Println("WorkflowFiesta Runner — headless build")
+			fmt.Println()
+			fmt.Println("This binary is for servers and CI pipelines. It has no setup wizard.")
+			fmt.Println("For the desktop installer with a GUI wizard, download:")
+			fmt.Println("  workflowfiesta-runner-windows-amd64-gui.exe")
+			fmt.Println()
+			fmt.Println("To run headless, set environment variables and use a subcommand:")
+			fmt.Println("  WORKFLOWFIESTA_TOKEN=<token> workflowfiesta-runner run")
+			fmt.Println()
+			fmt.Println("Press Enter to exit...")
+			bufio.NewReader(os.Stdin).ReadString('\n') //nolint:errcheck
+			return
+		}
+
+		// GUI build: open the first-run wizard or status window.
 		localui.RunAutoLaunch(localconfig.DefaultPath(), func(cfg *config.Config) {
 			ctx, cancel := context.WithCancel(context.Background())
 

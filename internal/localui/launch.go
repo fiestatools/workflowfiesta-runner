@@ -2,6 +2,10 @@
 
 package localui
 
+// HasGUI reports whether this build includes the local GUI (Fyne).
+// True in the desktop GUI build; false in headless/server builds.
+const HasGUI = true
+
 import (
 	"fmt"
 	"image/color"
