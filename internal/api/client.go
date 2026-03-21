@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -47,17 +46,11 @@ func (c *Client) Connect(ctx context.Context) error {
 	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
 	wsURL += "/runner-ws"
 
-	// Add token as query param as fallback
-	u, _ := url.Parse(wsURL)
-	q := u.Query()
-	q.Set("token", c.token)
-	u.RawQuery = q.Encode()
-
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+c.token)
 
 	log.Infof("[ws] connecting to %s", wsURL)
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, u.String(), header)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, header)
 	if err != nil {
 		return fmt.Errorf("websocket dial: %w", err)
 	}

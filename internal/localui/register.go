@@ -20,6 +20,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"workflowfiesta-runner/internal/localconfig"
@@ -230,7 +231,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	confirmTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.ConfirmTimeout))
 	confirmTimeoutHint := canvas.NewText(
 		"Seconds to wait for your approval before cancelling the job (default: 120 s).",
-		colorLabel,
+		colorMuted,
 	)
 	confirmTimeoutHint.TextSize = 10
 
@@ -239,7 +240,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	maxTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.MaxTimeout))
 	maxTimeoutHint := canvas.NewText(
 		"Maximum time (in seconds) a single job may run before being terminated (default: 180 s).",
-		colorLabel,
+		colorMuted,
 	)
 	maxTimeoutHint.TextSize = 10
 
@@ -264,7 +265,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 			pathsEntry.SetText(current + uri.Path())
 		}, win)
 	})
-	pathHint := canvas.NewText("Append :ro for read-only access.", colorLabel)
+	pathHint := canvas.NewText("Append :ro for read-only access.", colorMuted)
 	pathHint.TextSize = 10
 
 	networkRadio := widget.NewRadioGroup(
@@ -279,8 +280,6 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		nil,
 	)
 	sandboxRadio.SetSelected("None (disabled)")
-	sandboxHint := canvas.NewText("Kernel sandbox restricts filesystem access at the OS level. Linux only.", colorMuted)
-	sandboxHint.TextSize = 10
 
 	auditLogEntry := widget.NewEntry()
 	auditLogEntry.SetText(cfgDefaults.AuditLog)
@@ -307,21 +306,30 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	envIDHint.TextSize = 10
 
 	advancedContent := container.NewVBox(
-		makeSectionLabel("Sandbox"),
+		makeSectionRow("Sandbox", win,
+			"Sandbox Mode",
+			"Kernel mode (Landlock) restricts filesystem access at the OS level, even if a script tries to bypass the allowed-paths list.\n\nRequires Linux kernel 5.13 or later. Has no effect on Windows or macOS."),
 		sandboxRadio,
-		container.NewWithoutLayout(sandboxHint),
 		widget.NewSeparator(),
-		makeLabeledEntryWithHint2("Audit Log Path", auditLogEntry, auditLogHint),
+		makeLabeledEntryInfo("Audit Log Path", auditLogEntry, auditLogHint, win,
+			"Audit Log",
+			"Every script execution is appended to this file so you have a complete record of what ran on this machine.\n\nLeave blank to disable audit logging."),
 		widget.NewSeparator(),
-		makeSectionLabel("Blocked Patterns"),
+		makeSectionRow("Blocked Patterns", win,
+			"Blocked Patterns",
+			"Regular expressions that flag scripts in the approval dialog.\n\nScripts matching these patterns are highlighted as potentially dangerous, but you still decide whether to allow them. They are not automatically blocked."),
 		blockedEntry,
 		container.NewWithoutLayout(blockedHint),
 		widget.NewSeparator(),
-		makeSectionLabel("Always-Approved Patterns"),
+		makeSectionRow("Always-Approved Patterns", win,
+			"Always-Approved Patterns",
+			"Regular expressions for scripts that are automatically approved without showing an approval dialog.\n\nUse these for safe, frequently-run commands you never want to be interrupted by."),
 		alwaysAllowedEntry,
 		container.NewWithoutLayout(alwaysAllowedHint),
 		widget.NewSeparator(),
-		makeSectionLabel("Environment ID (override)"),
+		makeSectionRow("Environment ID (override)", win,
+			"Environment ID",
+			"UUID of an existing WorkflowFiesta environment to attach this runner to.\n\nLeave blank — a new environment is created automatically during registration."),
 		environmentIDEntry,
 		container.NewWithoutLayout(envIDHint),
 	)
@@ -332,17 +340,29 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 
 	steps[2] = container.NewVBox(
 		makeStepHeading("Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
-		makeSectionLabel("Folder Access"),
+		makeSectionRow("Folder Access", win,
+			"Folder Access",
+			"Directories this runner can read from and write to.\n\nScripts that access paths outside this list will be blocked or require approval, depending on your Approval Prompt setting.\n\nAppend :ro to a path for read-only access (e.g. ~/Documents:ro)."),
 		pathsEntry,
 		container.NewHBox(browseBtn, container.NewWithoutLayout(pathHint)),
 		widget.NewSeparator(),
-		makeSectionLabel("Approval Prompt"),
+		makeSectionRow("Approval Prompt", win,
+			"Approval Prompt",
+			"Controls when a dialog appears asking you to approve a script before it runs.\n\n• Always — you approve every single job.\n• Risky operations only — jobs that match blocked patterns or access sensitive paths require approval (recommended).\n• Never — all jobs run without asking."),
 		confirmRadio,
-		makeLabeledEntryWithHint2("Confirm timeout (s)", confirmTimeoutEntry, confirmTimeoutHint),
-		makeLabeledEntryWithHint2("Max timeout (s)", maxTimeoutEntry, maxTimeoutHint),
-		soundCheck,
+		makeLabeledEntryInfo("Confirm timeout (s)", confirmTimeoutEntry, confirmTimeoutHint, win,
+			"Confirm Timeout",
+			"How long (in seconds) the runner waits for you to approve a job.\n\nIf you don't respond within this time the job is automatically cancelled. Default: 120 s."),
+		makeLabeledEntryInfo("Max job timeout (s)", maxTimeoutEntry, maxTimeoutHint, win,
+			"Max Job Timeout",
+			"The maximum time (in seconds) a script is allowed to run before it is forcibly stopped.\n\nUse this to prevent runaway jobs from consuming resources indefinitely. Default: 180 s."),
+		container.NewHBox(soundCheck, makeInfoBtn(win,
+			"Sound on Approval",
+			"Plays a system notification sound when an approval dialog appears.\n\nUseful when the runner window is minimised or in the background.")),
 		widget.NewSeparator(),
-		makeSectionLabel("Network Access"),
+		makeSectionRow("Network Access", win,
+			"Network Access",
+			"Controls outbound network access for scripts running on this runner.\n\n• Allow all — no network restrictions (recommended for most use cases).\n• Local only — scripts can only connect to localhost / 127.0.0.1.\n• Block all — no network connections permitted."),
 		networkRadio,
 		widget.NewSeparator(),
 		advancedAccordion,
@@ -607,6 +627,38 @@ func makeLabeledEntryWithHint2(label string, entry *widget.Entry, hint *canvas.T
 	lbl.TextStyle = fyne.TextStyle{Bold: true}
 	return container.NewVBox(
 		container.NewWithoutLayout(lbl),
+		entry,
+		container.NewWithoutLayout(hint),
+	)
+}
+
+// makeInfoBtn creates a small icon button that shows an information dialog when tapped.
+func makeInfoBtn(win fyne.Window, title, explanation string) *widget.Button {
+	btn := widget.NewButtonWithIcon("", theme.InfoIcon(), func() {
+		dialog.ShowInformation(title, explanation, win)
+	})
+	btn.Importance = widget.LowImportance
+	return btn
+}
+
+// makeSectionRow creates an uppercase section label with an info icon button on the right.
+func makeSectionRow(text string, win fyne.Window, infoTitle, infoText string) fyne.CanvasObject {
+	lbl := canvas.NewText(strings.ToUpper(text), colorLabel)
+	lbl.TextSize = 10
+	lbl.TextStyle = fyne.TextStyle{Bold: true}
+	return container.NewHBox(
+		container.NewWithoutLayout(lbl),
+		makeInfoBtn(win, infoTitle, infoText),
+	)
+}
+
+// makeLabeledEntryInfo creates a labeled entry with a hint below and an info icon next to the label.
+func makeLabeledEntryInfo(label string, entry *widget.Entry, hint *canvas.Text, win fyne.Window, infoTitle, infoText string) fyne.CanvasObject {
+	lbl := canvas.NewText(strings.ToUpper(label), colorLabel)
+	lbl.TextSize = 10
+	lbl.TextStyle = fyne.TextStyle{Bold: true}
+	return container.NewVBox(
+		container.NewHBox(container.NewWithoutLayout(lbl), makeInfoBtn(win, infoTitle, infoText)),
 		entry,
 		container.NewWithoutLayout(hint),
 	)
