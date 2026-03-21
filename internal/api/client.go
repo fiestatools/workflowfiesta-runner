@@ -140,6 +140,9 @@ func (c *Client) Listen(ctx context.Context, jobChan chan<- Job) {
 
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			if closeErr, ok := err.(*websocket.CloseError); ok && (closeErr.Code == 4001 || closeErr.Code == 4003) {
+				log.Fatalf("Runner authentication failed (code %d: %s). Check your WORKFLOWFIESTA_TOKEN and re-register the runner.", closeErr.Code, closeErr.Text)
+			}
 			log.Warnf("WebSocket read error: %v", err)
 			c.mu.Lock()
 			c.conn = nil
