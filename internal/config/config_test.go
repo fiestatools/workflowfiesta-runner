@@ -11,6 +11,11 @@ func TestLoad_Defaults(t *testing.T) {
 	os.Unsetenv("WORKFLOWFIESTA_API_URL")
 	os.Unsetenv("WORKFLOWFIESTA_TOKEN")
 	os.Unsetenv("DOCKER_SOCKET")
+	// Redirect HOME so the credentials fallback file cannot be found.
+	tmp := t.TempDir()
+	orig := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer os.Setenv("HOME", orig)
 
 	cfg := config.Load()
 

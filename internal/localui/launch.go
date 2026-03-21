@@ -2,10 +2,6 @@
 
 package localui
 
-// HasGUI reports whether this build includes the local GUI (Fyne).
-// True in the desktop GUI build; false in headless/server builds.
-const HasGUI = true
-
 import (
 	"fmt"
 	"image/color"
@@ -22,6 +18,10 @@ import (
 	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/localconfig"
 )
+
+// HasGUI reports whether this build includes the local GUI (Fyne).
+// True in the desktop GUI build; false in headless/server builds.
+const HasGUI = true
 
 // RunAutoLaunch is the zero-CLI entry point for double-click launches.
 //
