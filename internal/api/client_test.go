@@ -1,200 +1,134 @@
 package api_test
 
 import (
-	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gorilla/websocket"
-
 	"workflowfiesta-runner/internal/api"
 )
 
-func TestClientConnect(t *testing.T) {
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-
+func TestClient_Heartbeat(t *testing.T) {
+	var received map[string]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Errorf("upgrade error: %v", err)
-			return
+		if r.URL.Path != "/api/runner/heartbeat" || r.Method != "POST" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		defer conn.Close()
-		// Echo messages back
-		for {
-			mt, msg, err := conn.ReadMessage()
-			if err != nil {
-				break
-			}
-			conn.WriteMessage(mt, msg)
-		}
+		json.NewDecoder(r.Body).Decode(&received)
+		w.WriteHeader(200)
+		w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
 
-	// Replace http:// with ws:// for the test
-	wsURL := "ws" + server.URL[4:]
-	client := api.New(wsURL, "test-token")
+	client := api.New(server.URL, "test-token")
+	if err := client.SendHeartbeat("idle"); err != nil {
+		t.Fatalf("SendHeartbeat failed: %v", err)
+	}
+	if received["status"] != "idle" {
+		t.Errorf("expected status=idle, got %q", received["status"])
+	}
+}
 
-	err := client.Connect(context.Background())
+func TestClient_PollNextJob_NoJob(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(204)
+	}))
+	defer server.Close()
+
+	client := api.New(server.URL, "test-token")
+	job, err := client.PollNextJob()
 	if err != nil {
-		t.Fatalf("Connect failed: %v", err)
+		t.Fatalf("PollNextJob failed: %v", err)
 	}
-	defer client.Close()
-
-	if err := client.SendHeartbeat(); err != nil {
-		t.Errorf("SendHeartbeat failed: %v", err)
+	if job != nil {
+		t.Errorf("expected nil job, got %+v", job)
 	}
 }
 
-func TestClientReportJobComplete(t *testing.T) {
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	received := make(chan []byte, 1)
-
+func TestClient_PollNextJob_WithJob(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, _ := upgrader.Upgrade(w, r, nil)
-		defer conn.Close()
-		_, msg, _ := conn.ReadMessage()
-		received <- msg
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"jobId":          "job-123",
+			"dockerImage":    "ubuntu:latest",
+			"script":         "echo hello",
+			"envVars":        map[string]string{"FOO": "bar"},
+			"timeoutSeconds": 60,
+		})
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + server.URL[4:]
-	client := api.New(wsURL, "test-token")
-	client.Connect(context.Background())
-	defer client.Close()
-
-	client.ReportJobComplete("job-123", 0, "hello output")
-	msg := <-received
-
-	if string(msg) == "" {
-		t.Error("expected message")
+	client := api.New(server.URL, "test-token")
+	job, err := client.PollNextJob()
+	if err != nil {
+		t.Fatalf("PollNextJob failed: %v", err)
+	}
+	if job == nil {
+		t.Fatal("expected a job, got nil")
+	}
+	if job.JobID != "job-123" {
+		t.Errorf("expected jobId=job-123, got %q", job.JobID)
+	}
+	if job.DockerImage != "ubuntu:latest" {
+		t.Errorf("expected dockerImage=ubuntu:latest, got %q", job.DockerImage)
 	}
 }
 
-func TestClient_ReportApprovalPending_SendsCorrectMessage(t *testing.T) {
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	received := make(chan []byte, 1)
-
+func TestClient_ReportJobComplete(t *testing.T) {
+	var body map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Errorf("upgrade error: %v", err)
-			return
-		}
-		defer conn.Close()
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		received <- msg
+		data, _ := io.ReadAll(r.Body)
+		json.Unmarshal(data, &body)
+		w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + server.URL[4:]
-	client := api.New(wsURL, "test-token")
-	if err := client.Connect(context.Background()); err != nil {
-		t.Fatalf("Connect failed: %v", err)
+	client := api.New(server.URL, "test-token")
+	if err := client.ReportJobComplete("job-123", 0, "hello output"); err != nil {
+		t.Fatalf("ReportJobComplete failed: %v", err)
 	}
-	defer client.Close()
+	if body["exitCode"].(float64) != 0 {
+		t.Errorf("expected exitCode=0")
+	}
+	if body["output"] != "hello output" {
+		t.Errorf("expected output=hello output, got %q", body["output"])
+	}
+}
 
+func TestClient_ReportApprovalPending(t *testing.T) {
+	var body map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		json.Unmarshal(data, &body)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := api.New(server.URL, "test-token")
 	if err := client.ReportApprovalPending("job-pending-1", "my-runner"); err != nil {
 		t.Fatalf("ReportApprovalPending failed: %v", err)
 	}
-
-	msg := <-received
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(msg, &parsed); err != nil {
-		t.Fatalf("failed to parse message: %v", err)
-	}
-	if parsed["type"] != "job:approval_pending" {
-		t.Errorf("expected type=job:approval_pending, got %q", parsed["type"])
-	}
-	if parsed["jobId"] != "job-pending-1" {
-		t.Errorf("expected jobId=job-pending-1, got %q", parsed["jobId"])
-	}
-	if parsed["runnerName"] != "my-runner" {
-		t.Errorf("expected runnerName=my-runner, got %q", parsed["runnerName"])
+	if body["runnerName"] != "my-runner" {
+		t.Errorf("expected runnerName=my-runner, got %q", body["runnerName"])
 	}
 }
 
-func TestClient_ReportApprovalResolved_SendsCorrectMessage(t *testing.T) {
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	received := make(chan []byte, 1)
-
+func TestClient_ReportApprovalResolved(t *testing.T) {
+	var body map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Errorf("upgrade error: %v", err)
-			return
-		}
-		defer conn.Close()
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		received <- msg
+		data, _ := io.ReadAll(r.Body)
+		json.Unmarshal(data, &body)
+		w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + server.URL[4:]
-	client := api.New(wsURL, "test-token")
-	if err := client.Connect(context.Background()); err != nil {
-		t.Fatalf("Connect failed: %v", err)
-	}
-	defer client.Close()
-
+	client := api.New(server.URL, "test-token")
 	if err := client.ReportApprovalResolved("job-resolved-1", true); err != nil {
 		t.Fatalf("ReportApprovalResolved failed: %v", err)
 	}
-
-	msg := <-received
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(msg, &parsed); err != nil {
-		t.Fatalf("failed to parse message: %v", err)
-	}
-	if parsed["type"] != "job:approval_resolved" {
-		t.Errorf("expected type=job:approval_resolved, got %q", parsed["type"])
-	}
-	if parsed["jobId"] != "job-resolved-1" {
-		t.Errorf("expected jobId=job-resolved-1, got %q", parsed["jobId"])
-	}
-	if approved, ok := parsed["approved"].(bool); !ok || !approved {
-		t.Errorf("expected approved=true, got %v", parsed["approved"])
-	}
-}
-
-func TestClient_ReportApprovalResolved_ApprovedFalse(t *testing.T) {
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	received := make(chan []byte, 1)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		received <- msg
-	}))
-	defer server.Close()
-
-	wsURL := "ws" + server.URL[4:]
-	client := api.New(wsURL, "test-token")
-	client.Connect(context.Background())
-	defer client.Close()
-
-	client.ReportApprovalResolved("job-denied-1", false)
-
-	msg := <-received
-	var parsed map[string]interface{}
-	json.Unmarshal(msg, &parsed)
-
-	if approved, ok := parsed["approved"].(bool); !ok || approved {
-		t.Errorf("expected approved=false, got %v", parsed["approved"])
+	if approved, ok := body["approved"].(bool); !ok || !approved {
+		t.Errorf("expected approved=true, got %v", body["approved"])
 	}
 }

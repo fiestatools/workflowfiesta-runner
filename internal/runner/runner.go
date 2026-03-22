@@ -27,13 +27,12 @@ type Runner struct {
 	client     *api.Client
 	executor   executor.Executor
 	sinks      []StatusSink
-	activeJobs sync.Map     // jobID -> struct{}: deduplicates re-dispatched jobs
+	activeJobs sync.Map     // jobID -> struct{}: deduplicates concurrent polls
 	semaphore  chan struct{} // limits concurrent job executions
 }
 
 func New(cfg *config.Config) *Runner {
-	apiURL := cfg.APIURL
-	client := api.New(apiURL, cfg.Token)
+	client := api.New(cfg.APIURL, cfg.Token)
 	maxJobs := cfg.MaxConcurrentJobs
 	if maxJobs <= 0 {
 		maxJobs = 4
@@ -47,7 +46,6 @@ func New(cfg *config.Config) *Runner {
 }
 
 // WithSink adds a StatusSink that receives lifecycle events from this runner.
-// Multiple sinks can be added; events are fanned out to all of them.
 func (r *Runner) WithSink(sink StatusSink) *Runner {
 	r.sinks = append(r.sinks, sink)
 	return r
@@ -60,38 +58,46 @@ func (r *Runner) notify(fn func(StatusSink)) {
 }
 
 func (r *Runner) Run(ctx context.Context) error {
-	// Connect with retry
-	r.client.ConnectWithRetry(ctx)
+	log.Info("[runner] starting HTTP poll loop")
+
+	// Send initial heartbeat so the API marks us online immediately
+	if err := r.client.SendHeartbeat("idle"); err != nil {
+		log.Warnf("[runner] initial heartbeat failed: %v", err)
+	}
 	r.notify(func(s StatusSink) { s.SetConnected(true) })
 
-	// Start heartbeat goroutine
 	go r.heartbeatLoop(ctx)
 
-	// Job channel
-	jobChan := make(chan api.Job, 10)
+	// Poll for jobs every 3 seconds
+	pollTicker := time.NewTicker(3 * time.Second)
+	defer pollTicker.Stop()
 
-	// Start listener
-	go r.client.Listen(ctx, jobChan)
-
-	// Process jobs
 	var wg sync.WaitGroup
 	for {
 		select {
 		case <-ctx.Done():
 			wg.Wait()
-			r.client.Close()
 			r.notify(func(s StatusSink) { s.SetConnected(false) })
 			return ctx.Err()
-		case job := <-jobChan:
-			if _, loaded := r.activeJobs.LoadOrStore(job.JobID, struct{}{}); loaded {
-				log.Infof("Skipping duplicate dispatch of job %s (already running)", job.JobID)
+		case <-pollTicker.C:
+			job, err := r.client.PollNextJob()
+			if err != nil {
+				log.Warnf("[runner] poll error: %v", err)
 				continue
 			}
+			if job == nil {
+				continue // no pending job
+			}
+
+			if _, loaded := r.activeJobs.LoadOrStore(job.JobID, struct{}{}); loaded {
+				log.Infof("[runner] skipping already-running job %s", job.JobID)
+				continue
+			}
+
 			wg.Add(1)
 			go func(j api.Job) {
 				defer wg.Done()
 				defer r.activeJobs.Delete(j.JobID)
-				// Acquire concurrency slot before executing
 				select {
 				case r.semaphore <- struct{}{}:
 				case <-ctx.Done():
@@ -99,13 +105,12 @@ func (r *Runner) Run(ctx context.Context) error {
 				}
 				defer func() { <-r.semaphore }()
 				r.handleJob(ctx, j)
-			}(job)
+			}(*job)
 		}
 	}
 }
 
 func scriptBlurb(script string) string {
-	// Return first non-empty line, capped at 80 chars.
 	for _, line := range strings.Split(script, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -120,14 +125,10 @@ func scriptBlurb(script string) string {
 }
 
 func (r *Runner) handleJob(ctx context.Context, job api.Job) {
-	log.Infof("Starting job %s (image: %s)", job.JobID, job.DockerImage)
+	log.Infof("[runner] starting job %s (image: %s)", job.JobID, job.DockerImage)
 
 	blurb := scriptBlurb(job.Script)
 	r.notify(func(s StatusSink) { s.SetJobRunning(job.JobID, job.DockerImage, blurb) })
-
-	if err := r.client.ReportJobClaimed(job.JobID); err != nil {
-		log.Warnf("Failed to claim job %s: %v", job.JobID, err)
-	}
 
 	outputChan := make(chan string, 100)
 	doneChan := make(chan struct{})
@@ -137,13 +138,14 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		timeout = 5 * time.Minute
 	}
 
-	// Collect and stream output concurrently
 	var outputBuilder strings.Builder
 	go func() {
 		defer close(doneChan)
 		for chunk := range outputChan {
 			outputBuilder.WriteString(chunk)
-			r.client.StreamOutput(job.JobID, chunk)
+			if err := r.client.StreamOutput(job.JobID, chunk); err != nil {
+				log.Warnf("[runner] stream output error: %v", err)
+			}
 			r.notify(func(s StatusSink) { s.AppendLog(chunk) })
 		}
 	}()
@@ -160,8 +162,10 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	<-doneChan
 
 	if err != nil {
-		log.Errorf("Job %s failed: %v", job.JobID, err)
-		r.client.ReportJobFailed(job.JobID, err.Error())
+		log.Errorf("[runner] job %s failed: %v", job.JobID, err)
+		if reportErr := r.client.ReportJobFailed(job.JobID, err.Error()); reportErr != nil {
+			log.Warnf("[runner] report-fail error: %v", reportErr)
+		}
 		r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, 1) })
 		r.notify(func(s StatusSink) {
 			s.AppendLog("[error] " + err.Error() + "\n")
@@ -171,8 +175,10 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	}
 
 	output := outputBuilder.String()
-	log.Infof("Job %s completed with exit code %d", job.JobID, exitCode)
-	r.client.ReportJobComplete(job.JobID, exitCode, output)
+	log.Infof("[runner] job %s completed with exit code %d", job.JobID, exitCode)
+	if reportErr := r.client.ReportJobComplete(job.JobID, exitCode, output); reportErr != nil {
+		log.Warnf("[runner] report-complete error: %v", reportErr)
+	}
 	r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, exitCode) })
 	r.notify(func(s StatusSink) { s.SetIdle() })
 }
@@ -185,13 +191,14 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := r.client.SendHeartbeat(); err != nil {
-				log.Warnf("Heartbeat failed: %v", err)
-			}
-			// WebSocket-level ping so the server's auto-pong resets our read
-			// deadline. This detects silent TCP drops within ~75s.
-			if err := r.client.SendPing(); err != nil {
-				log.Warnf("Ping failed: %v", err)
+			// Report busy if any active jobs, otherwise idle
+			status := "idle"
+			r.activeJobs.Range(func(_, _ interface{}) bool {
+				status = "busy"
+				return false // stop after first
+			})
+			if err := r.client.SendHeartbeat(status); err != nil {
+				log.Warnf("[runner] heartbeat failed: %v", err)
 			}
 		}
 	}
