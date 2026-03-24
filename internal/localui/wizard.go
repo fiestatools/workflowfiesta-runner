@@ -72,7 +72,7 @@ func RunWizard(configPath string) error {
 	dotsRow := container.NewHBox(dotCells...)
 
 	// ── nav ──────────────────────────────────────────────────────────────────
-	stepLabel := canvas.NewText("Step 1 of 4", colorLabel)
+	stepLabel := canvas.NewText(fmt.Sprintf("Step 1 of %d", numSteps), colorLabel)
 	stepLabel.TextSize = 11
 
 	backBtn := newButton("← Back", nil)
@@ -91,7 +91,7 @@ func RunWizard(configPath string) error {
 
 	showStep := func(n int) {
 		currentStep = n
-		stepLabel.Text = fmt.Sprintf("Step %d of 4", n+1)
+		stepLabel.Text = fmt.Sprintf("Step %d of %d", n+1, numSteps)
 		stepLabel.Refresh()
 		refreshDots(n)
 		makeDotCells(n)
@@ -101,12 +101,18 @@ func RunWizard(configPath string) error {
 		dotsRow.Refresh()
 		bodyHolder.Objects = []fyne.CanvasObject{stepContainers[n]}
 		bodyHolder.Refresh()
-		backBtn.Hidden = (n == 0)
-		nextBtn.Hidden = (n == 3)
-		finishBtn.Hidden = (n != 3)
-		backBtn.Refresh()
-		nextBtn.Refresh()
-		finishBtn.Refresh()
+		if n == 0 {
+			backBtn.Hide()
+		} else {
+			backBtn.Show()
+		}
+		if n == numSteps-1 {
+			nextBtn.Hide()
+			finishBtn.Show()
+		} else {
+			nextBtn.Show()
+			finishBtn.Hide()
+		}
 	}
 
 	// ── Step 1: Folder access ─────────────────────────────────────────────────
