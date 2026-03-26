@@ -26,6 +26,10 @@ type LocalConfig struct {
 	// If empty, the server auto-creates a new environment on registration.
 	EnvironmentID string `yaml:"environment_id,omitempty"`
 
+	// OrgID is populated from the first heartbeat response and persisted so it
+	// survives restarts. Used to namespace the local script library.
+	OrgID string `yaml:"org_id,omitempty"`
+
 	// Runtime-only fields — not persisted to YAML.
 	Headless   bool   `yaml:"-"`
 	RunnerName string `yaml:"-"`

@@ -2,6 +2,9 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -11,7 +14,13 @@ import (
 	"workflowfiesta-runner/internal/api"
 	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/executor"
+	"workflowfiesta-runner/internal/localconfig"
 )
+
+// RunnerCapabilities advertises which structured-tool features this binary supports.
+// Checked by the platform before routing tool jobs; old runners with empty capabilities
+// receive bash-script jobs only.
+var RunnerCapabilities = []string{"tool_dispatch", "script_library"}
 
 // StatusSink receives runner lifecycle events for display in a UI or CLI.
 type StatusSink interface {
@@ -23,12 +32,13 @@ type StatusSink interface {
 }
 
 type Runner struct {
-	cfg        *config.Config
-	client     *api.Client
-	executor   executor.Executor
-	sinks      []StatusSink
-	activeJobs sync.Map     // jobID -> struct{}: deduplicates concurrent polls
-	semaphore  chan struct{} // limits concurrent job executions
+	cfg         *config.Config
+	client      *api.Client
+	executor    executor.Executor
+	toolHandler *executor.ToolHandler
+	sinks       []StatusSink
+	activeJobs  sync.Map     // jobID -> struct{}: deduplicates concurrent polls
+	semaphore   chan struct{} // limits concurrent job executions
 }
 
 func New(cfg *config.Config) *Runner {
@@ -38,10 +48,11 @@ func New(cfg *config.Config) *Runner {
 		maxJobs = 4
 	}
 	return &Runner{
-		cfg:       cfg,
-		client:    client,
-		executor:  executor.NewWithClient(cfg, client),
-		semaphore: make(chan struct{}, maxJobs),
+		cfg:         cfg,
+		client:      client,
+		executor:    executor.NewWithClient(cfg, client),
+		toolHandler: executor.NewToolHandler(cfg.LocalConfig),
+		semaphore:   make(chan struct{}, maxJobs),
 	}
 }
 
@@ -60,9 +71,23 @@ func (r *Runner) notify(fn func(StatusSink)) {
 func (r *Runner) Run(ctx context.Context) error {
 	log.Info("[runner] starting HTTP poll loop")
 
-	// Send initial heartbeat so the API marks us online immediately
-	if err := r.client.SendHeartbeat("idle"); err != nil {
+	// Send initial heartbeat so the API marks us online immediately.
+	// Response includes org_id — use it to namespace the script library.
+	orgID, err := r.client.SendHeartbeat("idle", RunnerCapabilities)
+	if err != nil {
 		log.Warnf("[runner] initial heartbeat failed: %v", err)
+	} else if orgID != "" {
+		r.toolHandler.SetOrgID(orgID)
+		r.toolHandler.SetSyncer(r.client)
+		// Persist org_id to runner.yaml if it changed.
+		if r.cfg.LocalConfig != nil && r.cfg.LocalConfig.OrgID != orgID {
+			r.cfg.LocalConfig.OrgID = orgID
+			if saveErr := localconfig.Save(r.cfg.LocalConfig, localconfig.DefaultPath()); saveErr != nil {
+				log.Warnf("[runner] failed to persist org_id: %v", saveErr)
+			}
+		}
+		// Pull server scripts on startup — bootstrap org library.
+		go r.syncServerScripts(orgID)
 	}
 	r.notify(func(s StatusSink) { s.SetConnected(true) })
 
@@ -125,6 +150,20 @@ func scriptBlurb(script string) string {
 }
 
 func (r *Runner) handleJob(ctx context.Context, job api.Job) {
+	// ── run_local_script: expand from library, then run through security-gated executor ──
+	if job.ToolName == "run_local_script" {
+		r.handleRunLocalScript(ctx, job)
+		return
+	}
+
+	// ── Other structured tool dispatch ────────────────────────────────────────
+	// When tool_name is set, execute natively without spawning a subprocess.
+	if job.ToolName != "" {
+		r.handleToolJob(job)
+		return
+	}
+
+	// ── Standard bash script execution ───────────────────────────────────────
 	log.Infof("[runner] starting job %s (image: %s)", job.JobID, job.DockerImage)
 
 	blurb := scriptBlurb(job.Script)
@@ -183,6 +222,129 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	r.notify(func(s StatusSink) { s.SetIdle() })
 }
 
+// handleRunLocalScript loads a script from the local library and executes it through the
+// security-gated executor (approval gates, resource limits) so it behaves like a normal job.
+func (r *Runner) handleRunLocalScript(ctx context.Context, job api.Job) {
+	scriptName := ""
+	if job.ToolArgs != nil {
+		if n, ok := job.ToolArgs["name"].(string); ok {
+			scriptName = n
+		}
+	}
+	if scriptName == "" {
+		log.Errorf("[runner] run_local_script job %s: missing name argument", job.JobID)
+		_ = r.client.ReportJobFailed(job.JobID, "run_local_script: name argument is required")
+		r.notify(func(s StatusSink) { s.SetIdle() })
+		return
+	}
+
+	scriptContent, err := r.toolHandler.LoadLocalScript(scriptName)
+	if err != nil {
+		log.Errorf("[runner] run_local_script job %s: %v", job.JobID, err)
+		_ = r.client.ReportJobFailed(job.JobID, err.Error())
+		r.notify(func(s StatusSink) { s.SetIdle() })
+		return
+	}
+
+	// Merge env_vars from tool_args into job.EnvVars so the script receives them.
+	if envVarsRaw, ok := job.ToolArgs["env_vars"].(map[string]interface{}); ok {
+		if job.EnvVars == nil {
+			job.EnvVars = make(map[string]string)
+		}
+		for k, v := range envVarsRaw {
+			if s, ok := v.(string); ok {
+				job.EnvVars[k] = s
+			}
+		}
+	}
+
+	// Re-run as a standard bash job with the loaded script content.
+	job.ToolName = ""
+	job.Script = scriptContent
+	r.handleJob(ctx, job)
+}
+
+// syncServerScripts pulls the org's server-side script library and writes any
+// scripts that are missing or older than the server version to the local library.
+func (r *Runner) syncServerScripts(orgID string) {
+	scripts, err := r.client.ListServerScripts()
+	if err != nil {
+		log.Warnf("[runner] script library sync failed (list): %v", err)
+		return
+	}
+	if len(scripts) == 0 {
+		return
+	}
+
+	home, _ := os.UserHomeDir()
+	libDir := filepath.Join(home, ".workflowfiesta", "scripts", orgID)
+	if mkErr := os.MkdirAll(libDir, 0o755); mkErr != nil {
+		log.Warnf("[runner] script library sync: mkdir failed: %v", mkErr)
+		return
+	}
+
+	synced := 0
+	for _, meta := range scripts {
+		scriptPath := filepath.Join(libDir, meta.Name)
+		needsSync := false
+		if info, statErr := os.Stat(scriptPath); os.IsNotExist(statErr) {
+			needsSync = true
+		} else if statErr == nil && info.ModTime().Before(meta.UpdatedAt) {
+			needsSync = true
+		}
+		if !needsSync {
+			continue
+		}
+		content, fetchErr := r.client.GetScript(meta.Name)
+		if fetchErr != nil {
+			log.Warnf("[runner] script library sync: failed to fetch %q: %v", meta.Name, fetchErr)
+			continue
+		}
+		if writeErr := os.WriteFile(scriptPath, []byte(content), 0o755); writeErr != nil {
+			log.Warnf("[runner] script library sync: failed to write %q: %v", meta.Name, writeErr)
+			continue
+		}
+		synced++
+		log.Infof("[runner] script library sync: pulled %q from server", meta.Name)
+	}
+	if synced > 0 {
+		log.Infof("[runner] script library sync complete: %d/%d scripts updated", synced, len(scripts))
+	}
+}
+
+// handleToolJob executes a structured tool job natively without spawning a subprocess.
+// For run_local_script, it expands the script from the library and then routes back through
+// the security-gated executor so approval gates still apply.
+func (r *Runner) handleToolJob(job api.Job) {
+	log.Infof("[runner] native tool job %s: %s", job.JobID, job.ToolName)
+	r.notify(func(s StatusSink) { s.SetJobRunning(job.JobID, "", job.ToolName) })
+
+	var toolArgsRaw json.RawMessage
+	if job.ToolArgs != nil {
+		data, _ := json.Marshal(job.ToolArgs)
+		toolArgsRaw = data
+	}
+
+	result, err := r.toolHandler.Execute(job.ToolName, toolArgsRaw)
+	if err != nil {
+		log.Errorf("[runner] tool job %s (%s) error: %v", job.JobID, job.ToolName, err)
+		if reportErr := r.client.ReportJobFailed(job.JobID, err.Error()); reportErr != nil {
+			log.Warnf("[runner] report-fail error: %v", reportErr)
+		}
+		r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, "", 1) })
+		r.notify(func(s StatusSink) { s.SetIdle() })
+		return
+	}
+
+	log.Infof("[runner] tool job %s (%s) complete", job.JobID, job.ToolName)
+	r.notify(func(s StatusSink) { s.AppendLog(result + "\n") })
+	if reportErr := r.client.ReportJobComplete(job.JobID, 0, result); reportErr != nil {
+		log.Warnf("[runner] report-complete error: %v", reportErr)
+	}
+	r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, "", 0) })
+	r.notify(func(s StatusSink) { s.SetIdle() })
+}
+
 func (r *Runner) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -197,7 +359,7 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 				status = "busy"
 				return false // stop after first
 			})
-			if err := r.client.SendHeartbeat(status); err != nil {
+			if _, err := r.client.SendHeartbeat(status, RunnerCapabilities); err != nil {
 				log.Warnf("[runner] heartbeat failed: %v", err)
 			}
 		}
