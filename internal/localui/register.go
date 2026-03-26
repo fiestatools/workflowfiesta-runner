@@ -544,9 +544,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		savedText.Text = "✓ Saved to " + credPath + " — double-click the app any time to start."
 		savedText.Refresh()
 		saveBtn.Hide()
-		saveBtn.Refresh()
-		closeBtnInner.Hidden = false
-		closeBtnInner.Refresh()
+		closeBtnInner.Show()
 	}
 
 	// ── layout ────────────────────────────────────────────────────────────────
@@ -560,12 +558,18 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		refreshDots(n)
 		bodyHolder.Objects = []fyne.CanvasObject{steps[n]}
 		bodyHolder.Refresh()
-		backBtn.Hidden = (n == 0 || n == numSteps-1)
-		nextBtn.Hidden = (n == 0 || n == numSteps-1)
-		saveBtn.Hidden = (n != numSteps-1)
-		backBtn.Refresh()
-		nextBtn.Refresh()
-		saveBtn.Refresh()
+		if n == 0 || n == numSteps-1 {
+			backBtn.Hide()
+			nextBtn.Hide()
+		} else {
+			backBtn.Show()
+			nextBtn.Show()
+		}
+		if n == numSteps-1 {
+			saveBtn.Show()
+		} else {
+			saveBtn.Hide()
+		}
 	}
 	// Override show to also update bodyHolder
 	show = show0
