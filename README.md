@@ -1,12 +1,12 @@
 # WorkflowFiesta Runner
 
-A self-hosted runner for [WorkflowFiesta](https://github.com/ss-libs/workflowfiesta) that connects via WebSocket and executes jobs in isolated containers on your own infrastructure. Supports both Docker and Kubernetes.
+A self-hosted runner for [WorkflowFiesta](https://github.com/ss-libs/workflowfiesta) that connects via HTTP polling and executes jobs in isolated containers on your own infrastructure. Supports both Docker and Kubernetes.
 
 ## What it does
 
 The runner:
-1. Connects to your WorkflowFiesta API via WebSocket
-2. Listens for incoming job assignments
+1. Polls your WorkflowFiesta API for pending jobs every 3 seconds
+2. Sends a heartbeat every 30 seconds to report status and capabilities
 3. Runs the job script inside an isolated container (Docker or Kubernetes)
 4. Streams output back to the API in real time
 5. Reports the exit code and final output when the job completes
