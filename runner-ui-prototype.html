@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WorkflowFiesta Runner — UI Prototype</title>
+  <style>
+    :root {
+      --bg:          #0a0f1e;
+      --surface:     #0f172a;
+      --card:        #1e293b;
+      --border:      #334155;
+      --text:        #f8fafc;
+      --muted:       #94a3b8;
+      --label:       #64748b;
+      --primary:     #3b82f6;
+      --primary-dim: rgba(59,130,246,.12);
+      --success:     #22c55e;
+      --success-dim: rgba(34,197,94,.12);
+      --amber:       #f59e0b;
+      --amber-dim:   rgba(245,158,11,.12);
+      --danger:      #ef4444;
+      --danger-dim:  rgba(239,68,68,.12);
+      --terminal:    #020817;
+      --r:    8px;
+      --rsm:  4px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #060c1a;
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 32px 24px;
+    }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+    .section-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--label);
+      margin: 40px 0 14px;
+      padding-left: 2px;
+    }
+    .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+    .col-label { font-size: 10px; color: var(--label); text-align: center; margin-bottom: 8px; }
+
+    /* ────────── Window chrome ────────── */
+    .window {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    }
+    .titlebar {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 9px 14px;
+      display: flex;
+      align-items: center;
+    }
+    .mac-dots { display: flex; gap: 5px; }
+    .mac-dot { width: 11px; height: 11px; border-radius: 50%; }
+    .mac-dot.c { background: #ef4444; }
+    .mac-dot.m { background: #f59e0b; }
+    .mac-dot.x { background: #22c55e; }
+    .titlebar-label {
+      flex: 1;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--label);
+      margin: 0 28px;
+    }
+
+    /* ────────── Status window ────────── */
+    .sw { width: 460px; }
+
+    .sw-header {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sw-icon {
+      width: 38px; height: 38px;
+      border-radius: var(--rsm);
+      background: var(--primary-dim);
+      border: 1px solid rgba(59,130,246,.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .sw-info { flex: 1; min-width: 0; }
+    .sw-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .sw-host { font-size: 11px; color: var(--muted); }
+
+    .badge {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .badge-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .badge-idle   { background: var(--success-dim); color: var(--success); }
+    .badge-idle   .badge-dot { background: var(--success); }
+    .badge-run    { background: var(--amber-dim);   color: var(--amber);   }
+    .badge-run    .badge-dot { background: var(--amber); animation: pulse 1.4s ease-in-out infinite; }
+    .badge-off    { background: var(--danger-dim);  color: var(--danger);  }
+    .badge-off    .badge-dot { background: var(--danger); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    /* Stats strip */
+    .stats-strip {
+      display: grid;
+      grid-template-columns: repeat(4,1fr);
+      border-bottom: 1px solid var(--border);
+    }
+    .stat {
+      padding: 10px 0;
+      text-align: center;
+      border-right: 1px solid var(--border);
+    }
+    .stat:last-child { border-right: none; }
+    .stat-val { font-size: 18px; font-weight: 700; }
+    .stat-val.s  { color: var(--success); }
+    .stat-val.d  { color: var(--danger); }
+    .stat-val.sm { font-size: 13px; }
+    .stat-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: .07em; color: var(--label); margin-top: 1px; }
+
+    /* Active job card */
+    .job-card {
+      margin: 10px 12px;
+      padding: 10px 12px;
+      background: rgba(245,158,11,.06);
+      border: 1px solid rgba(245,158,11,.25);
+      border-radius: var(--rsm);
+    }
+    .job-card-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .job-card-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--amber); }
+    .job-card-id    { font-family: ui-monospace,monospace; font-size: 11px; color: var(--muted); }
+    .job-elapsed    { margin-left: auto; font-family: ui-monospace,monospace; font-size: 11px; font-weight: 700; color: var(--amber); }
+    .img-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      background: rgba(59,130,246,.1);
+      border: 1px solid rgba(59,130,246,.25);
+      border-radius: 12px;
+      font-size: 11px;
+      font-family: ui-monospace,monospace;
+      color: #93c5fd;
+      margin-bottom: 6px;
+    }
+    .script-preview {
+      font-family: ui-monospace,monospace;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(0,0,0,.2);
+      padding: 6px 8px;
+      border-radius: 3px;
+      white-space: pre;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Recent jobs list */
+    .section-hdr {
+      padding: 9px 14px 3px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--label);
+    }
+    .job-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      border-top: 1px solid rgba(255,255,255,.04);
+    }
+    .job-status {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 900;
+      flex-shrink: 0;
+    }
+    .job-status.ok   { background: var(--success-dim); color: var(--success); }
+    .job-status.fail { background: var(--danger-dim);  color: var(--danger);  }
+    .job-row-id  { font-family: ui-monospace,monospace; font-size: 11px; color: var(--text); font-weight: 500; }
+    .job-row-img { font-family: ui-monospace,monospace; font-size: 11px; color: var(--muted); }
+    .job-row-age { margin-left: auto; font-size: 11px; color: var(--label); }
+
+    /* Terminal */
+    .term-wrap { margin: 0 12px 12px; }
+    .term-hdr {
+      display: flex;
+      align-items: center;
+      padding: 6px 10px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: var(--rsm) var(--rsm) 0 0;
+    }
+    .term-hdr-lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--label); }
+    .term-clear { margin-left: auto; font-size: 11px; color: var(--label); cursor: pointer; padding: 0 4px; }
+    .term-clear:hover { color: var(--muted); }
+    .term-body {
+      background: var(--terminal);
+      border: 1px solid var(--border);
+      border-radius: 0 0 var(--rsm) var(--rsm);
+      padding: 8px 10px;
+      font-family: ui-monospace,monospace;
+      font-size: 11px;
+      color: #94a3b8;
+      line-height: 1.65;
+      min-height: 110px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .t  { display: block; }
+    .ok { color: #86efac; }
+    .er { color: #fca5a5; }
+    .dm { color: #475569; }
+
+    /* Disconnected banner */
+    .disc-banner {
+      margin: 10px 12px;
+      padding: 9px 12px;
+      background: var(--danger-dim);
+      border: 1px solid rgba(239,68,68,.25);
+      border-radius: var(--rsm);
+      font-size: 12px;
+      color: var(--danger);
+    }
+
+    /* ────────── Approval dialog ────────── */
+    .approval { width: 440px; }
+    .dlg-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .dlg-icon {
+      width: 32px; height: 32px;
+      border-radius: var(--rsm);
+      background: var(--amber-dim);
+      border: 1px solid rgba(245,158,11,.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .dlg-title { font-size: 13px; font-weight: 600; color: var(--text); }
+    .dlg-sub   { font-size: 11px; color: var(--muted); }
+    .dlg-body { padding: 14px 16px; }
+    .dlg-from { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+    .dlg-from b { color: var(--text); font-weight: 600; }
+    .script-box {
+      background: var(--terminal);
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: var(--rsm);
+      padding: 10px 12px;
+      font-family: ui-monospace,monospace;
+      font-size: 11px;
+      color: #94a3b8;
+      line-height: 1.7;
+      max-height: 120px;
+      overflow-y: auto;
+      margin-bottom: 14px;
+    }
+    .cd-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .cd-lbl { font-size: 11px; color: var(--muted); }
+    .cd-num { font-weight: 700; color: var(--amber); font-family: ui-monospace,monospace; }
+    .progress-track { height: 3px; background: var(--card); border-radius: 2px; margin-bottom: 14px; overflow: hidden; }
+    .progress-fill  { height: 100%; background: var(--amber); border-radius: 2px; width: 60%; transition: width 1s linear; }
+    .dlg-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .btn {
+      padding: 7px 16px;
+      border-radius: var(--rsm);
+      font-size: 12px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-ghost  { background: var(--card); border: 1px solid var(--border); color: var(--muted); }
+    .btn-green  { background: var(--success); color: #fff; }
+    .btn-blue   { background: var(--primary); color: #fff; }
+
+    /* ────────── Wizard ────────── */
+    .wizard { width: 500px; }
+    .wizard-body { padding: 26px 26px 18px; }
+
+    /* Progress dots */
+    .dots { display: flex; gap: 7px; margin-bottom: 22px; }
+    .pdot {
+      height: 8px;
+      width: 8px;
+      border-radius: 4px;
+      background: var(--border);
+      transition: all .2s;
+    }
+    .pdot.active { width: 24px; background: var(--primary); }
+    .pdot.done   { background: var(--success); }
+
+    .wiz-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .wiz-desc  { font-size: 12px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+
+    .field { margin-bottom: 12px; }
+    .field-lbl {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+    .field-inp {
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--rsm);
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    .field-inp:focus { border-color: var(--primary); }
+    .field-inp::placeholder { color: var(--label); }
+
+    .wizard-footer {
+      padding: 14px 26px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .wiz-step-num { font-size: 11px; color: var(--label); }
+
+    /* Radio items */
+    .perm-section { margin-bottom: 18px; }
+    .perm-lbl {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--label);
+      margin-bottom: 8px;
+    }
+    .radio-group { display: flex; flex-direction: column; gap: 6px; }
+    .radio-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: var(--rsm);
+      border: 1px solid transparent;
+      cursor: pointer;
+    }
+    .radio-item.sel { border-color: rgba(59,130,246,.3); background: var(--primary-dim); }
+    .radio-circle {
+      width: 15px; height: 15px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      flex-shrink: 0;
+      margin-top: 1px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .radio-item.sel .radio-circle { border-color: var(--primary); }
+    .radio-inner { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }
+    .radio-text { font-size: 12px; color: var(--text); }
+    .radio-desc { font-size: 11px; color: var(--muted); }
+
+    /* Token box */
+    .token-box {
+      background: var(--terminal);
+      border: 1px solid var(--border);
+      border-radius: var(--rsm);
+      padding: 11px 12px;
+      font-family: ui-monospace,monospace;
+      font-size: 11px;
+      color: #86efac;
+      word-break: break-all;
+      margin-bottom: 10px;
+    }
+    .runner-id { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+    .runner-id span { font-family: ui-monospace,monospace; color: var(--text); }
+
+    /* Done step */
+    .done-icon {
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      background: var(--success-dim);
+      border: 1px solid rgba(34,197,94,.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 14px;
+    }
+    .cmd-box {
+      background: var(--terminal);
+      border: 1px solid var(--border);
+      border-radius: var(--rsm);
+      padding: 10px 12px;
+      font-family: ui-monospace,monospace;
+      font-size: 12px;
+      color: #86efac;
+      margin-bottom: 10px;
+    }
+    .alert {
+      padding: 10px 12px;
+      background: rgba(245,158,11,.08);
+      border: 1px solid rgba(245,158,11,.25);
+      border-radius: var(--rsm);
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .alert b { color: var(--amber); }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <h1>WorkflowFiesta Runner</h1>
+  <p style="color:var(--muted);margin-top:4px;font-size:12px;">Desktop app UI prototype · dark theme · all states</p>
+
+  <!-- ═══════════════ Status Window ═══════════════ -->
+  <div class="section-title">Status Window</div>
+  <div class="row">
+
+    <!-- ── Idle ── -->
+    <div>
+      <div class="col-label">Connected · Idle</div>
+      <div class="window sw">
+        <div class="titlebar">
+          <div class="mac-dots"><div class="mac-dot c"></div><div class="mac-dot m"></div><div class="mac-dot x"></div></div>
+          <div class="titlebar-label">WorkflowFiesta Runner</div>
+        </div>
+        <div class="sw-header">
+          <div class="sw-icon">⚡</div>
+          <div class="sw-info">
+            <div class="sw-name">macbook-pro-robert</div>
+            <div class="sw-host">demo.workflowfiesta.com</div>
+          </div>
+          <div class="badge badge-idle"><div class="badge-dot"></div>Idle</div>
+        </div>
+        <div class="stats-strip">
+          <div class="stat"><div class="stat-val">12</div><div class="stat-lbl">Today</div></div>
+          <div class="stat"><div class="stat-val s">11</div><div class="stat-lbl">Passed</div></div>
+          <div class="stat"><div class="stat-val d">1</div><div class="stat-lbl">Failed</div></div>
+          <div class="stat"><div class="stat-val sm">4h 22m</div><div class="stat-lbl">Uptime</div></div>
+        </div>
+        <div class="section-hdr">Recent Jobs</div>
+        <div class="job-row">
+          <div class="job-status ok">✓</div>
+          <div><div class="job-row-id">job-8f2a</div><div class="job-row-img">python:3.11-slim</div></div>
+          <div class="job-row-age">2 min</div>
+        </div>
+        <div class="job-row">
+          <div class="job-status ok">✓</div>
+          <div><div class="job-row-id">job-7c19</div><div class="job-row-img">node:20-slim</div></div>
+          <div class="job-row-age">14 min</div>
+        </div>
+        <div class="job-row">
+          <div class="job-status fail">✗</div>
+          <div><div class="job-row-id">job-6b3e</div><div class="job-row-img">node:20-slim</div></div>
+          <div class="job-row-age">1h</div>
+        </div>
+        <div class="term-wrap">
+          <div class="term-hdr">
+            <span class="term-hdr-lbl">Output</span>
+            <span class="term-clear">Clear</span>
+          </div>
+          <div class="term-body">
+            <span class="t dm">[09:14:22] Connected to demo.workflowfiesta.com</span>
+            <span class="t">[09:15:01] Job job-8f2a received · python:3.11-slim</span>
+            <span class="t">Processing 1,240 records...</span>
+            <span class="t ok">[09:15:04] ✓ Completed (exit 0) in 3.2s</span>
+            <span class="t dm">[09:15:04] Waiting for next job...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Running ── -->
+    <div>
+      <div class="col-label">Running</div>
+      <div class="window sw">
+        <div class="titlebar">
+          <div class="mac-dots"><div class="mac-dot c"></div><div class="mac-dot m"></div><div class="mac-dot x"></div></div>
+          <div class="titlebar-label">WorkflowFiesta Runner</div>
+        </div>
+        <div class="sw-header">
+          <div class="sw-icon">⚡</div>
+          <div class="sw-info">
+            <div class="sw-name">macbook-pro-robert</div>
+            <div class="sw-host">demo.workflowfiesta.com</div>
+          </div>
+          <div class="badge badge-run"><div class="badge-dot"></div>Running</div>
+        </div>
+        <div class="stats-strip">
+          <div class="stat"><div class="stat-val">13</div><div class="stat-lbl">Today</div></div>
+          <div class="stat"><div class="stat-val s">11</div><div class="stat-lbl">Passed</div></div>
+          <div class="stat"><div class="stat-val d">1</div><div class="stat-lbl">Failed</div></div>
+          <div class="stat"><div class="stat-val sm">4h 24m</div><div class="stat-lbl">Uptime</div></div>
+        </div>
+        <div class="job-card">
+          <div class="job-card-head">
+            <span class="job-card-title">Active Job</span>
+            <span class="job-card-id">job-9a4f</span>
+            <span class="job-elapsed">00:23</span>
+          </div>
+          <div class="img-pill">🐳 python:3.11-slim</div>
+          <div class="script-preview">import pandas as pd
+df = pd.read_csv('/data/sales.csv')
+print(df.groupby('rep').sum())</div>
+        </div>
+        <div class="section-hdr">Recent Jobs</div>
+        <div class="job-row">
+          <div class="job-status ok">✓</div>
+          <div><div class="job-row-id">job-8f2a</div><div class="job-row-img">python:3.11-slim</div></div>
+          <div class="job-row-age">2 min</div>
+        </div>
+        <div class="job-row">
+          <div class="job-status ok">✓</div>
+          <div><div class="job-row-id">job-7c19</div><div class="job-row-img">node:20-slim</div></div>
+          <div class="job-row-age">14 min</div>
+        </div>
+        <div class="term-wrap">
+          <div class="term-hdr">
+            <span class="term-hdr-lbl">Output</span>
+            <span class="term-clear">Clear</span>
+          </div>
+          <div class="term-body">
+            <span class="t">[09:17:44] Job job-9a4f · python:3.11-slim</span>
+            <span class="t dm">Pulling image... done</span>
+            <span class="t">Running script...</span>
+            <span class="t">         rep    sales</span>
+            <span class="t">0      Alice   142000</span>
+            <span class="t">1        Bob    98000</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Disconnected ── -->
+    <div>
+      <div class="col-label">Disconnected</div>
+      <div class="window" style="width:320px;">
+        <div class="titlebar">
+          <div class="mac-dots"><div class="mac-dot c"></div><div class="mac-dot m"></div><div class="mac-dot x"></div></div>
+          <div class="titlebar-label">WorkflowFiesta Runner</div>
+        </div>
+        <div class="sw-header">
+          <div class="sw-icon" style="background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);">⚡</div>
+          <div class="sw-info">
+            <div class="sw-name">macbook-pro-robert</div>
+            <div class="sw-host">demo.workflowfiesta.com</div>
+          </div>
+          <div class="badge badge-off"><div class="badge-dot"></div>Offline</div>
+        </div>
+        <div class="disc-banner">⚠ Connection lost — retrying in 8s</div>
+        <div class="stats-strip">
+          <div class="stat"><div class="stat-val">12</div><div class="stat-lbl">Today</div></div>
+          <div class="stat"><div class="stat-val s">11</div><div class="stat-lbl">Passed</div></div>
+          <div class="stat"><div class="stat-val d">1</div><div class="stat-lbl">Failed</div></div>
+          <div class="stat"><div class="stat-val sm" style="color:var(--label);">—</div><div class="stat-lbl">Uptime</div></div>
+        </div>
+        <div class="term-wrap">
+          <div class="term-hdr"><span class="term-hdr-lbl">Output</span></div>
+          <div class="term-body">
+            <span class="t er">[09:18:01] Connection lost</span>
+            <span class="t dm">[09:18:02] Retry 1/∞ in 5s...</span>
+            <span class="t dm">[09:18:09] Retry 2/∞ in 8s...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- .row -->
+
+  <!-- ═══════════════ Approval Dialog ═══════════════ -->
+  <div class="section-title">Approval Dialog</div>
+  <div class="row">
+    <div class="window approval">
+      <div class="dlg-header">
+        <div class="dlg-icon">⚠️</div>
+        <div>
+          <div class="dlg-title">Job Approval Required</div>
+          <div class="dlg-sub">Review the script before allowing execution</div>
+        </div>
+      </div>
+      <div class="dlg-body">
+        <div class="dlg-from">From workflow on <b>macbook-pro-robert</b></div>
+        <div class="script-box">#!/bin/bash
+# Deploy to production
+git pull origin main
+npm ci --production
+pm2 restart all
+echo "Deploy complete"</div>
+        <div class="cd-row">
+          <span class="cd-lbl">Auto-deny in</span>
+          <span class="cd-num">18s</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill"></div></div>
+      </div>
+      <div class="dlg-footer">
+        <button class="btn btn-ghost">✕  Deny</button>
+        <button class="btn btn-green">✓  Allow</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ Registration Wizard ═══════════════ -->
+  <div class="section-title">Registration Wizard</div>
+  <div class="row">
+
+    <!-- Step 1: Connect -->
+    <div>
+      <div class="col-label">Step 1 · Connect</div>
+      <div class="window wizard">
+        <div class="titlebar">
+          <div class="mac-dots"><div class="mac-dot c"></div><div class="mac-dot m"></div><div class="mac-dot x"></div></div>
+          <div class="titlebar-label">WorkflowFiesta · Register Runner</div>
+        </div>
+        <div class="wizard-body">
+          <div class="dots">
+            <div class="pdot active"></div>
+            <div class="pdot"></div>
+            <div class="pdot"></div>
+            <div class="pdot"></div>
+          </div>
+          <div class="wiz-title">Connect to WorkflowFiesta</div>
+          <div class="wiz-desc">Enter your API URL and register this machine as a self-hosted runner.</div>
+          <div class="field"><div class="field-lbl">API URL</div><input class="field-inp" value="http://localhost:3001"></div>
+          <div class="field"><div class="field-lbl">Organization ID</div><input class="field-inp" placeholder="your-organization-id"></div>
+          <div class="field"><div class="field-lbl">Runner Name</div><input class="field-inp" value="macbook-pro-robert"></div>
+          <button class="btn btn-blue" style="width:100%;justify-content:center;padding:9px 16px;font-size:13px;margin-top:4px;">Connect &amp; Register</button>
+        </div>
+        <div class="wizard-footer">
+          <div class="wiz-step-num">Step 1 of 4</div>
+          <div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Token -->
+    <div>
+      <div class="col-label">Step 2 · Save Token</div>
+      <div class="window wizard">
+        <div class="titlebar">
+          <div class="mac-dots"><div class="mac-dot c"></div><div class="mac-dot m"></div><div class="mac-dot x"></div></div>
+          <div class="titlebar-label">WorkflowFiesta · Register Runner</div>
+        </div>
+        <div class="wizard-body">
+          <div class="dots">
+            <div class="pdot done"></div>
+            <div class="pdot active"></div>
+            <div class="pdot"></div>
+            <div class="pdot"></div>
+          </div>
+          <div class="wiz-title">Runner Registered!</div>
+          <div class="wiz-desc">Save this token now — it will not be shown again.</div>
+          <div class="runner-id">Runner ID: <span>r-8f2a9c3d-4e1b</span></div>
+          <div class="field-lbl" style="margin-bottom:6px;">Token</div>
+          <div class="token-box">wf_runner_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJydW5uZXJJZCI6InItOGYyYTljM2QtNGUxYiIsIm9yZ0lkIjoib3JnLTEyMyJ9.XXXXX</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;">Copy</button>
+            <span style="font-size:11px;color:var(--label);">Saved automatically to credentials.env</span>
+          </div>
+        </div>
+        <div class="wizard-footer">
+          <button class="btn btn-ghost">← Back</button>
+          <button class="btn btn-blue">Next →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Permissions -->
+    <div>
+      <div class="col-label">Step 3 · Permissions</div>
+      <div class="window wizard">
+        <div class="titlebar">
+          <div class="mac-dots"><div class="mac-dot c"></div><div class="mac-dot m"></div><div class="mac-dot x"></div></div>
+          <div class="titlebar-label">WorkflowFiesta · Register Runner</div>
+        </div>
+        <div class="wizard-body">
+          <div class="dots">
+            <div class="pdot done"></div>
+            <div class="pdot done"></div>
+            <div class="pdot active"></div>
+            <div class="pdot"></div>
+          </div>
+          <div class="wiz-title">Local Permissions</div>
+          <div class="wiz-desc">Control what scripts can access on this machine.</div>
+          <div class="perm-section">
+            <div class="perm-lbl">Approval Prompt</div>
+            <div class="radio-group">
+              <div class="radio-item"><div class="radio-circle"></div><div><div class="radio-text">Always</div><div class="radio-desc">Prompt for every job</div></div></div>
+              <div class="radio-item sel"><div class="radio-circle"><div class="radio-inner"></div></div><div><div class="radio-text">Risky only <span style="color:var(--primary);font-size:10px;">(recommended)</span></div><div class="radio-desc">Prompt for sudo, rm, curl -X, network writes</div></div></div>
+              <div class="radio-item"><div class="radio-circle"></div><div><div class="radio-text">Never</div><div class="radio-desc">Auto-approve all jobs</div></div></div>
+            </div>
+          </div>
+          <div class="perm-section">
+            <div class="perm-lbl">Network</div>
+            <div class="radio-group">
+              <div class="radio-item sel"><div class="radio-circle"><div class="radio-inner"></div></div><div><div class="radio-text">Allow all</div><div class="radio-desc">Scripts can reach any host</div></div></div>
+              <div class="radio-item"><div class="radio-circle"></div><div><div class="radio-text">Local only</div><div class="radio-desc">localhost / LAN</div></div></div>
+              <div class="radio-item"><div class="radio-circle"></div><div><div class="radio-text">Block all</div><div class="radio-desc">No outbound connections</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="wizard-footer">
+          <button class="btn btn-ghost">← Back</button>
+          <button class="btn btn-blue">Save &amp; Start →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: Done -->
+    <div>
+      <div class="col-label">Step 4 · Done</div>
+      <div class="window wizard">
+        <div class="titlebar">
+          <div class="mac-dots"><div class="mac-dot c"></div><div class="mac-dot m"></div><div class="mac-dot x"></div></div>
+          <div class="titlebar-label">WorkflowFiesta · Register Runner</div>
+        </div>
+        <div class="wizard-body">
+          <div class="dots">
+            <div class="pdot done"></div>
+            <div class="pdot done"></div>
+            <div class="pdot done"></div>
+            <div class="pdot done"></div>
+          </div>
+          <div class="done-icon">✓</div>
+          <div class="wiz-title">All set!</div>
+          <div class="wiz-desc">Your runner is configured and credentials are saved.</div>
+          <div class="field-lbl" style="margin-bottom:6px;">Start the runner with:</div>
+          <div class="cmd-box">source ~/.workflowfiesta/credentials.env<br>workflowfiesta-runner run-local</div>
+          <div class="alert"><b>Credentials saved</b> to <code>~/.workflowfiesta/credentials.env</code> (mode 600). Keep this file private.</div>
+        </div>
+        <div class="wizard-footer">
+          <div></div>
+          <button class="btn btn-green" style="padding:8px 24px;">Close</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- .row -->
+</body>
+</html>

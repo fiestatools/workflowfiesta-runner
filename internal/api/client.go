@@ -93,12 +93,16 @@ func (c *Client) PollNextJob() (*Job, error) {
 	return &job, nil
 }
 
-// SendHeartbeat updates last_seen, reports the runner's current status, and
-// advertises supported capabilities. Returns the runner's org_id from the server.
-func (c *Client) SendHeartbeat(status string, capabilities []string) (string, error) {
+// SendHeartbeat updates last_seen, reports the runner's current status,
+// advertises supported capabilities, and identifies the runner's OS/arch/version.
+// Returns the runner's org_id from the server.
+func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarch, version string) (string, error) {
 	resp, err := c.do("POST", "/api/runner/heartbeat", map[string]interface{}{
 		"status":       status,
 		"capabilities": capabilities,
+		"os":           goos,
+		"arch":         goarch,
+		"version":      version,
 	})
 	if err != nil {
 		return "", err

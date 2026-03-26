@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -73,7 +74,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Send initial heartbeat so the API marks us online immediately.
 	// Response includes org_id — use it to namespace the script library.
-	orgID, err := r.client.SendHeartbeat("idle", RunnerCapabilities)
+	orgID, err := r.client.SendHeartbeat("idle", RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
 	if err != nil {
 		log.Warnf("[runner] initial heartbeat failed: %v", err)
 	} else if orgID != "" {
@@ -359,7 +360,7 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 				status = "busy"
 				return false // stop after first
 			})
-			if _, err := r.client.SendHeartbeat(status, RunnerCapabilities); err != nil {
+			if _, err := r.client.SendHeartbeat(status, RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version); err != nil {
 				log.Warnf("[runner] heartbeat failed: %v", err)
 			}
 		}

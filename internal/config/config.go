@@ -23,6 +23,7 @@ type Config struct {
 	LocalConfigPath     string // path to runner.yaml (local executor only)
 	LocalConfig         *localconfig.LocalConfig // loaded local config (set by run-local)
 	MaxConcurrentJobs   int    // max simultaneous jobs (0 → default 4)
+	Version             string // binary version (set from ldflags by main)
 }
 
 // CredentialsFilePath returns the path to the auto-saved credentials file.

@@ -146,6 +146,7 @@ var runCmd = &cobra.Command{
 		if cfg.Token == "" {
 			return fmt.Errorf("WORKFLOWFIESTA_TOKEN is required")
 		}
+		cfg.Version = version
 
 		log.Infof("Starting WorkflowFiesta runner (version %s)", version)
 		log.Infof("API URL: %s", cfg.APIURL)
@@ -233,6 +234,7 @@ var runLocalCmd = &cobra.Command{
 		if cfg.Token == "" {
 			return fmt.Errorf("WORKFLOWFIESTA_TOKEN is required")
 		}
+		cfg.Version = version
 
 		configPath, _ := cmd.Flags().GetString("config")
 		headless, _ := cmd.Flags().GetBool("headless")

@@ -76,7 +76,7 @@ func TestSendHeartbeat_SendsCapabilities(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	_, err := client.SendHeartbeat("idle", []string{"tool_dispatch", "script_library"})
+	_, err := client.SendHeartbeat("idle", []string{"tool_dispatch", "script_library"}, "linux", "amd64", "v0.7.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +93,32 @@ func TestSendHeartbeat_SendsCapabilities(t *testing.T) {
 	}
 }
 
+func TestSendHeartbeat_SendsOSArch(t *testing.T) {
+	var captured map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"orgId":""}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server)
+	_, err := client.SendHeartbeat("busy", []string{}, "windows", "amd64", "v0.7.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured["os"] != "windows" {
+		t.Errorf("expected os=windows, got %v", captured["os"])
+	}
+	if captured["arch"] != "amd64" {
+		t.Errorf("expected arch=amd64, got %v", captured["arch"])
+	}
+	if captured["version"] != "v0.7.0" {
+		t.Errorf("expected version=v0.7.0, got %v", captured["version"])
+	}
+}
+
 func TestSendHeartbeat_ReturnsOrgID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -101,7 +127,7 @@ func TestSendHeartbeat_ReturnsOrgID(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	orgID, err := client.SendHeartbeat("idle", []string{})
+	orgID, err := client.SendHeartbeat("idle", []string{}, "linux", "amd64", "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +143,7 @@ func TestSendHeartbeat_HTTP400_ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	_, err := client.SendHeartbeat("idle", nil)
+	_, err := client.SendHeartbeat("idle", nil, "", "", "")
 	if err == nil {
 		t.Error("expected error for HTTP 400, got nil")
 	}
