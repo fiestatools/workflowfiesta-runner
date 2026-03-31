@@ -178,6 +178,26 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		timeout = 5 * time.Minute
 	}
 
+	// If the job has a git repo, provision a worktree and run bash inside it.
+	var bashWorkDir string
+	if job.GitRepoURL != "" {
+		wtPath, wtErr := EnsureWorktree(job.GitRepoURL, job.GitRef, job.JobID)
+		if wtErr != nil {
+			log.Errorf("[runner] worktree setup for bash job %s failed: %v", job.JobID, wtErr)
+			if reportErr := r.client.ReportJobFailed(job.JobID, "worktree setup: "+wtErr.Error()); reportErr != nil {
+				log.Warnf("[runner] report-fail error: %v", reportErr)
+			}
+			r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, 1) })
+			r.notify(func(s StatusSink) { s.SetIdle() })
+			return
+		}
+		defer CleanupWorktree(job.GitRepoURL, job.JobID)
+		if reportErr := r.client.ReportWorktreePath(job.JobID, wtPath); reportErr != nil {
+			log.Warnf("[runner] report worktree path: %v", reportErr)
+		}
+		bashWorkDir = wtPath
+	}
+
 	var outputBuilder strings.Builder
 	go func() {
 		defer close(doneChan)
@@ -197,6 +217,7 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		EnvVars:    job.EnvVars,
 		Timeout:    timeout,
 		OutputChan: outputChan,
+		WorkDir:    bashWorkDir,
 	})
 	close(outputChan)
 	<-doneChan

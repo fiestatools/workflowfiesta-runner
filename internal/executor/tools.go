@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -466,13 +467,31 @@ func (h *ToolHandler) listDir(args map[string]interface{}) (string, error) {
 
 // ── glob_files ────────────────────────────────────────────────────────────────
 
+type globMatch struct {
+	rel   string
+	mtime time.Time
+}
+
 func (h *ToolHandler) globFiles(args map[string]interface{}) (string, error) {
 	pattern := strArg(args, "pattern")
-	cwd := strArg(args, "cwd")
+	// Accept "path" (platform-tools schema) or "cwd" (internal alias).
+	cwd := strArg(args, "path")
+	if cwd == "" {
+		cwd = strArg(args, "cwd")
+	}
+	headLimit := intArg(args, "head_limit", 500)
+	if headLimit <= 0 || headLimit > 500 {
+		headLimit = 500
+	}
 	if pattern == "" {
 		return "Error: pattern is required", nil
 	}
+
+	// Default base: worktree root if active, else configured working dir.
 	base := h.localCfg.WorkingDir()
+	if h.worktreeRoot != "" {
+		base = h.worktreeRoot
+	}
 	if cwd != "" {
 		resolved, err := h.resolvePath(cwd)
 		if err != nil {
@@ -481,7 +500,17 @@ func (h *ToolHandler) globFiles(args map[string]interface{}) (string, error) {
 		base = resolved
 	}
 
-	var matches []string
+	// Build ignore patterns list.
+	var ignorePatterns []string
+	if ignoreRaw, ok := args["ignore"].([]interface{}); ok {
+		for _, v := range ignoreRaw {
+			if s, ok := v.(string); ok {
+				ignorePatterns = append(ignorePatterns, s)
+			}
+		}
+	}
+
+	var matches []globMatch
 	_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -493,8 +522,19 @@ func (h *ToolHandler) globFiles(args map[string]interface{}) (string, error) {
 		if relErr != nil {
 			return nil
 		}
+		// Check ignore patterns before including.
+		for _, ig := range ignorePatterns {
+			if matchGlob(ig, rel) {
+				return nil
+			}
+		}
 		if matchGlob(pattern, rel) {
-			matches = append(matches, rel)
+			info, infoErr := d.Info()
+			var mtime time.Time
+			if infoErr == nil {
+				mtime = info.ModTime()
+			}
+			matches = append(matches, globMatch{rel: rel, mtime: mtime})
 		}
 		return nil
 	})
@@ -502,10 +542,21 @@ func (h *ToolHandler) globFiles(args map[string]interface{}) (string, error) {
 	if len(matches) == 0 {
 		return "No files found", nil
 	}
-	if len(matches) > 500 {
-		matches = matches[:500]
+
+	// Sort by modification time descending (most recently modified first), matching Claude Code behaviour.
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].mtime.After(matches[j].mtime)
+	})
+
+	if len(matches) > headLimit {
+		matches = matches[:headLimit]
 	}
-	return strings.Join(matches, "\n"), nil
+
+	out := make([]string, len(matches))
+	for i := range matches {
+		out[i] = matches[i].rel
+	}
+	return strings.Join(out, "\n"), nil
 }
 
 // matchGlob matches a path against a glob pattern supporting ** for recursive matching.
@@ -557,16 +608,54 @@ func matchGlob(pattern, path string) bool {
 
 // ── grep_files ────────────────────────────────────────────────────────────────
 
+// grepOpts collects parsed grep parameters to avoid long arg lists.
+type grepOpts struct {
+	pattern         string
+	globFilter      string
+	fileType        string // rg --type, e.g. "ts", "py"
+	base            string
+	outputMode      string // "content" | "files_with_matches" | "count"
+	context         int
+	caseInsensitive bool
+	multiline       bool
+	headLimit       int
+	offset          int
+}
+
 func (h *ToolHandler) grepFiles(args map[string]interface{}) (string, error) {
 	pattern := strArg(args, "pattern")
-	globFilter := strArg(args, "glob")
-	cwd := strArg(args, "cwd")
-	ctx := intArg(args, "context", 2)
 	if pattern == "" {
 		return "Error: pattern is required", nil
 	}
 
+	globFilter := strArg(args, "glob")
+	fileType := strArg(args, "type")
+	// Accept "path" (platform-tools schema) or "cwd" (internal alias).
+	cwd := strArg(args, "path")
+	if cwd == "" {
+		cwd = strArg(args, "cwd")
+	}
+	outputMode := strArg(args, "output_mode")
+	if outputMode == "" {
+		outputMode = "files_with_matches"
+	}
+	ctx := intArg(args, "context", 0)
+	if c2 := intArg(args, "-C", 0); c2 > ctx {
+		ctx = c2
+	}
+	caseInsensitive := boolArg(args, "-i") || boolArg(args, "case_insensitive")
+	multiline := boolArg(args, "multiline")
+	headLimit := intArg(args, "head_limit", 250)
+	if headLimit <= 0 {
+		headLimit = 250
+	}
+	offset := intArg(args, "offset", 0)
+
+	// Default base: worktree root if active, else configured working dir.
 	base := h.localCfg.WorkingDir()
+	if h.worktreeRoot != "" {
+		base = h.worktreeRoot
+	}
 	if cwd != "" {
 		resolved, err := h.resolvePath(cwd)
 		if err != nil {
@@ -575,45 +664,53 @@ func (h *ToolHandler) grepFiles(args map[string]interface{}) (string, error) {
 		base = resolved
 	}
 
-	// Prefer system grep/rg if available for speed.
-	if grepBin, lookErr := exec.LookPath("grep"); lookErr == nil {
-		return h.systemGrep(grepBin, pattern, globFilter, base, min(ctx, 10))
+	opts := grepOpts{
+		pattern:         pattern,
+		globFilter:      globFilter,
+		fileType:        fileType,
+		base:            base,
+		outputMode:      outputMode,
+		context:         min(ctx, 10),
+		caseInsensitive: caseInsensitive,
+		multiline:       multiline,
+		headLimit:       headLimit,
+		offset:          offset,
 	}
+
+	// Prefer ripgrep for speed and full feature support.
 	if rgBin, lookErr := exec.LookPath("rg"); lookErr == nil {
-		return h.ripgrepSearch(rgBin, pattern, globFilter, base, min(ctx, 10))
+		return h.ripgrepSearch(rgBin, opts)
 	}
-
-	// Fallback: pure Go regexp walk.
-	return h.goGrep(pattern, globFilter, base)
+	// Fallback: pure Go regexp walk (supports all output_mode values).
+	return h.goGrep(opts)
 }
 
-func (h *ToolHandler) systemGrep(grepBin, pattern, globFilter, base string, ctx int) (string, error) {
-	cmdArgs := []string{"-r", "-n", fmt.Sprintf("-C%d", ctx), "--color=never"}
-	if globFilter != "" {
-		cmdArgs = append(cmdArgs, "--include="+globFilter)
-	}
-	cmdArgs = append(cmdArgs, "--", pattern, base)
-	cmd := exec.Command(grepBin, cmdArgs...)
-	out, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return "No matches found", nil
+func (h *ToolHandler) ripgrepSearch(rgBin string, opts grepOpts) (string, error) {
+	var cmdArgs []string
+	switch opts.outputMode {
+	case "files_with_matches":
+		cmdArgs = append(cmdArgs, "-l")
+	case "count":
+		cmdArgs = append(cmdArgs, "-c")
+	default: // "content"
+		cmdArgs = append(cmdArgs, "-n", "--no-heading")
+		if opts.context > 0 {
+			cmdArgs = append(cmdArgs, fmt.Sprintf("-C%d", opts.context))
 		}
-		return fmt.Sprintf("grep error: %v", err), nil
 	}
-	result := string(out)
-	if len(result) > 40_000 {
-		result = result[:40_000] + "\n[... truncated]"
+	if opts.caseInsensitive {
+		cmdArgs = append(cmdArgs, "-i")
 	}
-	return result, nil
-}
-
-func (h *ToolHandler) ripgrepSearch(rgBin, pattern, globFilter, base string, ctx int) (string, error) {
-	cmdArgs := []string{"-n", fmt.Sprintf("-C%d", ctx), "--no-heading"}
-	if globFilter != "" {
-		cmdArgs = append(cmdArgs, "--glob="+globFilter)
+	if opts.multiline {
+		cmdArgs = append(cmdArgs, "-U", "--multiline-dotall")
 	}
-	cmdArgs = append(cmdArgs, "--", pattern, base)
+	if opts.globFilter != "" {
+		cmdArgs = append(cmdArgs, "--glob="+opts.globFilter)
+	}
+	if opts.fileType != "" {
+		cmdArgs = append(cmdArgs, "--type="+opts.fileType)
+	}
+	cmdArgs = append(cmdArgs, "--", opts.pattern, opts.base)
 	cmd := exec.Command(rgBin, cmdArgs...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -622,25 +719,33 @@ func (h *ToolHandler) ripgrepSearch(rgBin, pattern, globFilter, base string, ctx
 		}
 		return fmt.Sprintf("rg error: %v", err), nil
 	}
-	result := string(out)
-	if len(result) > 40_000 {
-		result = result[:40_000] + "\n[... truncated]"
-	}
-	return result, nil
+	return applyPagination(string(out), opts.offset, opts.headLimit), nil
 }
 
-func (h *ToolHandler) goGrep(pattern, globFilter, base string) (string, error) {
-	re, err := regexp.Compile(pattern)
+func (h *ToolHandler) goGrep(opts grepOpts) (string, error) {
+	pat := opts.pattern
+	if opts.caseInsensitive {
+		pat = "(?i)" + pat
+	}
+	re, err := regexp.Compile(pat)
 	if err != nil {
 		return fmt.Sprintf("Invalid pattern: %v", err), nil
 	}
-	var results []string
-	_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, walkErr error) error {
+
+	type fileCount struct {
+		rel   string
+		count int
+	}
+	var contentLines []string
+	var matchedFiles []string
+	var fileCounts []fileCount
+
+	_ = filepath.WalkDir(opts.base, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || d.IsDir() {
 			return nil
 		}
-		if globFilter != "" {
-			matched, _ := filepath.Match(globFilter, d.Name())
+		if opts.globFilter != "" {
+			matched, _ := filepath.Match(opts.globFilter, d.Name())
 			if !matched {
 				return nil
 			}
@@ -649,24 +754,72 @@ func (h *ToolHandler) goGrep(pattern, globFilter, base string) (string, error) {
 		if readErr != nil {
 			return nil
 		}
+		rel, _ := filepath.Rel(opts.base, p)
 		lines := strings.Split(string(data), "\n")
-		rel, _ := filepath.Rel(base, p)
+		count := 0
 		for i, line := range lines {
 			if re.MatchString(line) {
-				results = append(results, fmt.Sprintf("%s:%d:%s", rel, i+1, line))
+				count++
+				if opts.outputMode == "content" {
+					contentLines = append(contentLines, fmt.Sprintf("%s:%d:%s", rel, i+1, line))
+				}
 			}
+		}
+		if count > 0 {
+			matchedFiles = append(matchedFiles, rel)
+			fileCounts = append(fileCounts, fileCount{rel: rel, count: count})
 		}
 		return nil
 	})
-	if len(results) == 0 {
-		return "No matches found", nil
+
+	switch opts.outputMode {
+	case "count":
+		var lines []string
+		for _, fc := range fileCounts {
+			lines = append(lines, fmt.Sprintf("%s:%d", fc.rel, fc.count))
+		}
+		if len(lines) == 0 {
+			return "No matches found", nil
+		}
+		return applyPagination(strings.Join(lines, "\n"), opts.offset, opts.headLimit), nil
+	case "files_with_matches":
+		if len(matchedFiles) == 0 {
+			return "No matches found", nil
+		}
+		return applyPagination(strings.Join(matchedFiles, "\n"), opts.offset, opts.headLimit), nil
+	default: // "content"
+		if len(contentLines) == 0 {
+			return "No matches found", nil
+		}
+		return applyPagination(strings.Join(contentLines, "\n"), opts.offset, opts.headLimit), nil
 	}
-	combined := strings.Join(results, "\n")
-	if len(combined) > 40_000 {
-		combined = combined[:40_000] + "\n[... truncated]"
-	}
-	return combined, nil
 }
+
+// applyPagination skips `offset` lines and returns up to `limit` lines.
+func applyPagination(output string, offset, limit int) string {
+	if output == "" {
+		return output
+	}
+	lines := strings.Split(output, "\n")
+	// Trim trailing empty line from trailing newline.
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if offset > 0 && offset < len(lines) {
+		lines = lines[offset:]
+	} else if offset >= len(lines) {
+		return "No matches found"
+	}
+	if limit > 0 && len(lines) > limit {
+		lines = lines[:limit]
+	}
+	result := strings.Join(lines, "\n")
+	if len(result) > 40_000 {
+		result = result[:40_000] + "\n[... truncated]"
+	}
+	return result
+}
+
 
 // ── Script Library ────────────────────────────────────────────────────────────
 
