@@ -21,7 +21,7 @@ import (
 // RunnerCapabilities advertises which structured-tool features this binary supports.
 // Checked by the platform before routing tool jobs; old runners with empty capabilities
 // receive bash-script jobs only.
-var RunnerCapabilities = []string{"tool_dispatch", "script_library"}
+var RunnerCapabilities = []string{"tool_dispatch", "script_library", "git_worktrees"}
 
 // StatusSink receives runner lifecycle events for display in a UI or CLI.
 type StatusSink interface {
@@ -178,6 +178,26 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		timeout = 5 * time.Minute
 	}
 
+	// If the job has a git repo, provision a worktree and run bash inside it.
+	var bashWorkDir string
+	if job.GitRepoURL != "" {
+		wtPath, wtErr := EnsureWorktree(job.GitRepoURL, job.GitRef, job.JobID)
+		if wtErr != nil {
+			log.Errorf("[runner] worktree setup for bash job %s failed: %v", job.JobID, wtErr)
+			if reportErr := r.client.ReportJobFailed(job.JobID, "worktree setup: "+wtErr.Error()); reportErr != nil {
+				log.Warnf("[runner] report-fail error: %v", reportErr)
+			}
+			r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, 1) })
+			r.notify(func(s StatusSink) { s.SetIdle() })
+			return
+		}
+		defer CleanupWorktree(job.GitRepoURL, job.JobID)
+		if reportErr := r.client.ReportWorktreePath(job.JobID, wtPath); reportErr != nil {
+			log.Warnf("[runner] report worktree path: %v", reportErr)
+		}
+		bashWorkDir = wtPath
+	}
+
 	var outputBuilder strings.Builder
 	go func() {
 		defer close(doneChan)
@@ -197,6 +217,7 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		EnvVars:    job.EnvVars,
 		Timeout:    timeout,
 		OutputChan: outputChan,
+		WorkDir:    bashWorkDir,
 	})
 	close(outputChan)
 	<-doneChan
@@ -319,6 +340,28 @@ func (r *Runner) syncServerScripts(orgID string) {
 func (r *Runner) handleToolJob(job api.Job) {
 	log.Infof("[runner] native tool job %s: %s", job.JobID, job.ToolName)
 	r.notify(func(s StatusSink) { s.SetJobRunning(job.JobID, "", job.ToolName) })
+
+	// If the job has a git repo, create an isolated worktree and scope file tools to it.
+	if job.GitRepoURL != "" {
+		wtPath, err := EnsureWorktree(job.GitRepoURL, job.GitRef, job.JobID)
+		if err != nil {
+			log.Errorf("[runner] worktree setup for job %s failed: %v", job.JobID, err)
+			if reportErr := r.client.ReportJobFailed(job.JobID, "worktree setup: "+err.Error()); reportErr != nil {
+				log.Warnf("[runner] report-fail error: %v", reportErr)
+			}
+			r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, "", 1) })
+			r.notify(func(s StatusSink) { s.SetIdle() })
+			return
+		}
+		defer CleanupWorktree(job.GitRepoURL, job.JobID)
+
+		if reportErr := r.client.ReportWorktreePath(job.JobID, wtPath); reportErr != nil {
+			log.Warnf("[runner] report worktree path error: %v", reportErr)
+		}
+
+		r.toolHandler.SetWorktreeRoot(wtPath)
+		defer r.toolHandler.SetWorktreeRoot("")
+	}
 
 	var toolArgsRaw json.RawMessage
 	if job.ToolArgs != nil {

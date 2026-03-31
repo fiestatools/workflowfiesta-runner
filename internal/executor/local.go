@@ -174,8 +174,11 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	// Layer 3: Build minimal environment.
 	env := e.buildEnv(input.EnvVars)
 
-	// CWD = first writable allowed path.
+	// CWD = worktree override if set, otherwise first writable allowed path.
 	cwd := e.localCfg.WorkingDir()
+	if input.WorkDir != "" {
+		cwd = input.WorkDir
+	}
 
 	// Wrap script with ulimit resource caps (Unix only; ulimit is not available on Windows).
 	script := input.Script

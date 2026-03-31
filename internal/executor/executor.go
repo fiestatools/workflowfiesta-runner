@@ -15,6 +15,10 @@ type Input struct {
 	EnvVars    map[string]string
 	Timeout    time.Duration
 	OutputChan chan<- string
+	// WorkDir overrides the default working directory for this job.
+	// When empty, the executor uses localCfg.WorkingDir().
+	// Set to a git worktree path to run bash/script jobs inside an isolated checkout.
+	WorkDir string
 }
 
 // Executor runs a script in an isolated container environment.
