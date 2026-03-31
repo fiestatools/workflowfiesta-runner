@@ -93,8 +93,8 @@ type StatusWindow struct {
 	// Recent jobs
 	recentBox *fyne.Container
 
-	// Log
-	logRich   *widget.RichText
+	// Log (read-only Entry for text selection support)
+	logEntry  *widget.Entry
 	logScroll *container.Scroll
 
 	// State tracking
@@ -359,8 +359,7 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 
 	clearBtn := newButton("Clear", func() {
 		fyne.Do(func() {
-			sw.logRich.Segments = nil
-			sw.logRich.Refresh()
+			sw.logEntry.SetText("")
 		})
 	})
 	clearBtn.Importance = widget.LowImportance
@@ -375,10 +374,13 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	)
 	termHeader := container.NewStack(termHeaderBg, container.NewPadded(termHeaderRow))
 
-	sw.logRich = widget.NewRichText()
-	sw.logRich.Wrapping = fyne.TextWrapWord
+	// Use a multi-line Entry so users can select and copy output text.
+	// Wrapping is off so long lines stay on one line for easier selection.
+	sw.logEntry = widget.NewMultiLineEntry()
+	sw.logEntry.Wrapping = fyne.TextWrapOff
+	sw.logEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	sw.logScroll = container.NewScroll(sw.logRich)
+	sw.logScroll = container.NewScroll(sw.logEntry)
 	sw.logScroll.SetMinSize(fyne.NewSize(0, 160))
 
 	termBodyBg := canvas.NewRectangle(colorTermBg)
@@ -634,17 +636,22 @@ func (sw *StatusWindow) rebuildRecentJobs() {
 	sw.recentBox.Refresh()
 }
 
+const maxLogBytes = 50 * 1024 // 50 KB cap — trim oldest content when exceeded
+
 func (sw *StatusWindow) appendToLog(chunk string) {
 	fyne.Do(func() {
-		// Cap at 500 segments
-		if len(sw.logRich.Segments) > 500 {
-			sw.logRich.Segments = sw.logRich.Segments[100:]
+		current := sw.logEntry.Text
+		combined := current + chunk
+		// Trim oldest content if we exceed the cap
+		if len(combined) > maxLogBytes {
+			// Drop the first half to avoid constant trimming
+			combined = combined[len(combined)-maxLogBytes/2:]
+			// Align to next newline boundary
+			if idx := strings.Index(combined, "\n"); idx >= 0 {
+				combined = combined[idx+1:]
+			}
 		}
-		sw.logRich.Segments = append(sw.logRich.Segments, &widget.TextSegment{
-			Text:  chunk,
-			Style: widget.RichTextStyle{TextStyle: fyne.TextStyle{Monospace: true}},
-		})
-		sw.logRich.Refresh()
+		sw.logEntry.SetText(combined)
 		sw.logScroll.ScrollToBottom()
 	})
 }

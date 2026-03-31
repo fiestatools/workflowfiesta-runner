@@ -19,7 +19,12 @@ func headlessApproval(req ApprovalRequest) ApprovalResult {
 	}
 	fmt.Printf("Job ID : %s\n", req.JobID)
 	fmt.Printf("Script :\n%s\n", truncateScript(req.Script, 15))
-	fmt.Printf("\nAllow? [y/N] (auto-deny in %ds): ", int(req.Timeout.Seconds()))
+	neverTimeout := req.Timeout <= 0
+	if neverTimeout {
+		fmt.Printf("\nAllow? [y/N] (waiting indefinitely): ")
+	} else {
+		fmt.Printf("\nAllow? [y/N] (auto-deny in %ds): ", int(req.Timeout.Seconds()))
+	}
 
 	resultCh := make(chan string, 1)
 	go func() {
@@ -30,6 +35,17 @@ func headlessApproval(req ApprovalRequest) ApprovalResult {
 			resultCh <- ""
 		}
 	}()
+
+	if neverTimeout {
+		response := <-resultCh
+		approved := strings.ToLower(strings.TrimSpace(response)) == "y"
+		if approved {
+			fmt.Println("[allowed]")
+			return ApprovalAllow
+		}
+		fmt.Println("[denied]")
+		return ApprovalDeny
+	}
 
 	select {
 	case response := <-resultCh:

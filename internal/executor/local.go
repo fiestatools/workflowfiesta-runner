@@ -120,6 +120,9 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 			_ = e.apiClient.ReportApprovalPending(input.JobID, e.localCfg.RunnerName)
 		}
 		timeout := time.Duration(e.localCfg.ConfirmTimeout) * time.Second
+		if e.localCfg.ConfirmNeverTimeout {
+			timeout = 0 // signal to approval UI: wait indefinitely
+		}
 		result := localui.RequestApproval(localui.ApprovalRequest{
 			JobID:      input.JobID,
 			Script:     input.Script,

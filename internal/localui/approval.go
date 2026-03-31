@@ -92,13 +92,23 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 	scriptScroll.SetMinSize(fyne.NewSize(420, 90))
 	scriptBlock := container.NewStack(scriptBg, container.NewPadded(scriptScroll))
 
-	countdownLabel := canvas.NewText(fmt.Sprintf("Auto-deny in  %ds", int(req.Timeout.Seconds())), colorMuted)
+	neverTimeout := req.Timeout <= 0
+	var countdownLabel *canvas.Text
+	var progress *widget.ProgressBar
+	if neverTimeout {
+		countdownLabel = canvas.NewText("Waiting for your approval...", colorMuted)
+	} else {
+		countdownLabel = canvas.NewText(fmt.Sprintf("Auto-deny in  %ds", int(req.Timeout.Seconds())), colorMuted)
+	}
 	countdownLabel.TextSize = 11
 
-	progress := widget.NewProgressBar()
+	progress = widget.NewProgressBar()
 	progress.Min = 0
 	progress.Max = float64(req.Timeout)
 	progress.Value = float64(req.Timeout)
+	if neverTimeout {
+		progress.Hide()
+	}
 
 	body := container.NewPadded(container.NewVBox(
 		container.NewWithoutLayout(fromText),
@@ -141,29 +151,31 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 	stopped := make(chan struct{})
 	s.stopTick = sync.OnceFunc(func() { close(stopped) })
 
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		remaining := int(req.Timeout.Seconds())
-		for {
-			select {
-			case <-stopped:
-				return
-			case <-ticker.C:
-				remaining--
-				if remaining <= 0 {
-					s.decide(ApprovalDeny)
-					win.Close()
+	if !neverTimeout {
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			remaining := int(req.Timeout.Seconds())
+			for {
+				select {
+				case <-stopped:
 					return
+				case <-ticker.C:
+					remaining--
+					if remaining <= 0 {
+						s.decide(ApprovalDeny)
+						win.Close()
+						return
+					}
+					fyne.Do(func() {
+						countdownLabel.Text = fmt.Sprintf("Auto-deny in  %ds", remaining)
+						countdownLabel.Refresh()
+						progress.SetValue(float64(remaining))
+					})
 				}
-				fyne.Do(func() {
-					countdownLabel.Text = fmt.Sprintf("Auto-deny in  %ds", remaining)
-					countdownLabel.Refresh()
-					progress.SetValue(float64(remaining))
-				})
 			}
-		}
-	}()
+		}()
+	}
 
 	// ── size persistence — only save after 3 consecutive stable readings to avoid
 	// spurious saves from content reflows mid-job ────────────────────────────
