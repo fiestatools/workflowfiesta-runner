@@ -19,6 +19,8 @@ type Job struct {
 	TimeoutSeconds int                    `json:"timeoutSeconds"`
 	ToolName       string                 `json:"toolName,omitempty"`
 	ToolArgs       map[string]interface{} `json:"toolArgs,omitempty"`
+	GitRepoURL     string                 `json:"git_repo_url,omitempty"`
+	GitRef         string                 `json:"git_ref,omitempty"`
 }
 
 type Client struct {
@@ -137,6 +139,11 @@ func (c *Client) ReportJobComplete(jobID string, exitCode int, output string) er
 // ReportJobFailed marks the job failed.
 func (c *Client) ReportJobFailed(jobID, errMsg string) error {
 	return c.post("/api/runner/jobs/"+jobID+"/fail", map[string]string{"error": errMsg})
+}
+
+// ReportWorktreePath reports the local worktree path for a job to the server.
+func (c *Client) ReportWorktreePath(jobID, worktreePath string) error {
+	return c.post("/api/runner/jobs/"+jobID+"/worktree", map[string]string{"worktree_path": worktreePath})
 }
 
 // ReportApprovalPending notifies the UI that a script is awaiting approval.

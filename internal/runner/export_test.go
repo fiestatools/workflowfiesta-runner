@@ -114,3 +114,9 @@ func NewToolHandlerForTest(t *testing.T) (*executor.ToolHandler, string) {
 
 // ScriptBlurb exposes the package-level scriptBlurb for unit tests.
 var ScriptBlurb = scriptBlurb
+
+// ReposCacheDir exposes the package-level reposCacheDir for unit tests.
+var ReposCacheDir = reposCacheDir
+
+// WorktreePath exposes the package-level worktreePath for unit tests.
+var WorktreePath = worktreePath

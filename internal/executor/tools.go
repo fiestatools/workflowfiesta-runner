@@ -25,9 +25,10 @@ type ScriptSyncer interface {
 // ToolHandler executes named platform tools natively on the local filesystem.
 // It is used when runner_jobs.tool_name is set (structured tool dispatch).
 type ToolHandler struct {
-	localCfg *localconfig.LocalConfig
-	orgID    string       // populated from heartbeat; used for per-org script namespacing
-	syncer   ScriptSyncer // nil = no server sync
+	localCfg     *localconfig.LocalConfig
+	orgID        string       // populated from heartbeat; used for per-org script namespacing
+	syncer       ScriptSyncer // nil = no server sync
+	worktreeRoot string       // when non-empty, relative paths resolve here and it is allowed
 }
 
 // NewToolHandler creates a ToolHandler bound to the given local config.
@@ -50,6 +51,14 @@ func (h *ToolHandler) SetOrgID(orgID string) {
 // SetSyncer wires in a ScriptSyncer for fire-and-forget server sync on save.
 func (h *ToolHandler) SetSyncer(s ScriptSyncer) {
 	h.syncer = s
+}
+
+// SetWorktreeRoot sets (or clears) the worktree root for this handler.
+// When non-empty, relative paths are resolved against the worktree root and
+// the worktree directory is implicitly allowed regardless of localCfg.AllowedPaths.
+// Pass an empty string to clear after the job completes.
+func (h *ToolHandler) SetWorktreeRoot(root string) {
+	h.worktreeRoot = root
 }
 
 // Execute dispatches to the appropriate native tool implementation.
@@ -92,13 +101,26 @@ func (h *ToolHandler) Execute(toolName string, toolArgsRaw json.RawMessage) (str
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
 // resolvePath resolves p relative to the working dir and validates it stays within allowed_paths.
+// When a worktree root is active, relative paths resolve against it and the worktree directory
+// is implicitly allowed so the agent can freely read/write the checked-out repo.
 func (h *ToolHandler) resolvePath(p string) (string, error) {
 	var resolved string
 	if filepath.IsAbs(p) {
 		resolved = filepath.Clean(p)
+	} else if h.worktreeRoot != "" {
+		resolved = filepath.Clean(filepath.Join(h.worktreeRoot, p))
 	} else {
 		resolved = filepath.Clean(filepath.Join(h.localCfg.WorkingDir(), p))
 	}
+
+	// If a worktree root is set, allow any path inside it without checking localCfg.
+	if h.worktreeRoot != "" {
+		wt := filepath.Clean(h.worktreeRoot)
+		if resolved == wt || strings.HasPrefix(resolved, wt+string(filepath.Separator)) {
+			return resolved, nil
+		}
+	}
+
 	for _, a := range h.localCfg.ExpandedAllowedPaths() {
 		clean := filepath.Clean(a)
 		if resolved == clean || strings.HasPrefix(resolved, clean+string(filepath.Separator)) {
