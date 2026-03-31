@@ -24,6 +24,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"workflowfiesta-runner/internal/localconfig"
+	"workflowfiesta-runner/internal/platform"
 )
 
 // RegistrationResult holds the credentials returned from a successful registration.
@@ -771,8 +772,12 @@ func friendlyHTTPError(status int, body []byte) error {
 
 // writeCredentials saves shell export lines to credPath (mode 0600).
 func writeCredentials(credPath string, r *RegistrationResult) error {
-	if err := os.MkdirAll(filepath.Dir(credPath), 0o700); err != nil {
+	dir := filepath.Dir(credPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		_ = platform.SetHidden(filepath.Join(home, ".workflowfiesta"))
 	}
 	content := fmt.Sprintf(
 		"export WORKFLOWFIESTA_API_URL=%s\nexport WORKFLOWFIESTA_TOKEN=%s\nexport WORKFLOWFIESTA_RUNNER_ID=%s\nexport WORKFLOWFIESTA_RUNNER_NAME=%s\n",

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"workflowfiesta-runner/internal/platform"
 )
 
 // LocalConfig holds the configuration for local executor mode, loaded from runner.yaml.
@@ -96,8 +97,13 @@ func Load(path string) (*LocalConfig, error) {
 
 // Save writes cfg to path (creating parent directories as needed).
 func Save(cfg *LocalConfig, path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
+	}
+	// Best-effort: hide the ~/.workflowfiesta directory on Windows.
+	if home, err := os.UserHomeDir(); err == nil {
+		_ = platform.SetHidden(filepath.Join(home, ".workflowfiesta"))
 	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {

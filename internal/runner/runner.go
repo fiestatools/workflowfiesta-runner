@@ -16,6 +16,7 @@ import (
 	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/executor"
 	"workflowfiesta-runner/internal/localconfig"
+	"workflowfiesta-runner/internal/platform"
 )
 
 // RunnerCapabilities advertises which structured-tool features this binary supports.
@@ -304,6 +305,7 @@ func (r *Runner) syncServerScripts(orgID string) {
 		log.Warnf("[runner] script library sync: mkdir failed: %v", mkErr)
 		return
 	}
+	_ = platform.SetHidden(filepath.Join(home, ".workflowfiesta"))
 
 	synced := 0
 	for _, meta := range scripts {
