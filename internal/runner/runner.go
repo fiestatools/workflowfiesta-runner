@@ -45,6 +45,11 @@ type Runner struct {
 
 func New(cfg *config.Config) *Runner {
 	client := api.New(cfg.APIURL, cfg.Token)
+	// Seed org ID from persisted local config so all requests (including the
+	// first heartbeat on restart) include X-Org-Id for fast tenant routing.
+	if cfg.LocalConfig != nil && cfg.LocalConfig.OrgID != "" {
+		client.SetOrgID(cfg.LocalConfig.OrgID)
+	}
 	maxJobs := cfg.MaxConcurrentJobs
 	if maxJobs <= 0 {
 		maxJobs = 4
@@ -74,11 +79,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	log.Info("[runner] starting HTTP poll loop")
 
 	// Send initial heartbeat so the API marks us online immediately.
-	// Response includes org_id — use it to namespace the script library.
+	// Response includes org_id — use it to namespace the script library and
+	// set X-Org-Id on all future requests for fast tenant routing.
 	orgID, err := r.client.SendHeartbeat("idle", RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
 	if err != nil {
 		log.Warnf("[runner] initial heartbeat failed: %v", err)
 	} else if orgID != "" {
+		r.client.SetOrgID(orgID)
 		r.toolHandler.SetOrgID(orgID)
 		r.toolHandler.SetSyncer(r.client)
 		// Persist org_id to runner.yaml if it changed.

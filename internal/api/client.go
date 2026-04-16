@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -26,6 +27,8 @@ type Job struct {
 type Client struct {
 	apiURL     string
 	token      string
+	orgID      string
+	mu         sync.Mutex
 	httpClient *http.Client
 }
 
@@ -37,6 +40,14 @@ func New(apiURL, token string) *Client {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// SetOrgID updates the org ID sent on every subsequent request as X-Org-Id.
+// Safe to call concurrently.
+func (c *Client) SetOrgID(orgID string) {
+	c.mu.Lock()
+	c.orgID = orgID
+	c.mu.Unlock()
 }
 
 func (c *Client) do(method, path string, body interface{}) (*http.Response, error) {
@@ -55,6 +66,12 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	c.mu.Lock()
+	orgID := c.orgID
+	c.mu.Unlock()
+	if orgID != "" {
+		req.Header.Set("X-Org-Id", orgID)
 	}
 	return c.httpClient.Do(req)
 }
