@@ -12,4 +12,5 @@ func (sw *StatusWindow) SetIdle()                      {}
 func (sw *StatusWindow) SetJobRunning(_, _, _ string)  {}
 func (sw *StatusWindow) SetJobComplete(_, _ string, _ int) {}
 func (sw *StatusWindow) AppendLog(_ string)            {}
+func (sw *StatusWindow) ReportHeartbeat(_ int, _ string) {}
 func (sw *StatusWindow) SetOnOpenSettings(_ func())    {}

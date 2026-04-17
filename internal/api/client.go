@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,33 +90,43 @@ func (c *Client) post(path string, body interface{}) error {
 }
 
 // PollNextJob claims the next pending job for this runner.
-// Returns nil, nil when there is no pending job.
-func (c *Client) PollNextJob() (*Job, error) {
+// On success with no work, returns nil, 204, nil.
+// httpStatus is 0 when err is non-nil before any response (e.g. connection error).
+func (c *Client) PollNextJob() (*Job, int, error) {
 	resp, err := c.do("GET", "/api/runner/jobs/next", nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == 204 {
-		return nil, nil // no pending job
+	status := resp.StatusCode
+	if status == 204 {
+		return nil, 204, nil // no pending job
 	}
-	if resp.StatusCode == 401 {
+	if status == 401 {
 		log.Fatal("[runner] authentication failed — check your token and re-register the runner")
 	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("poll failed: HTTP %d", resp.StatusCode)
+	if status >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		msg := strings.TrimSpace(string(b))
+		if len(msg) > 400 {
+			msg = msg[:400] + "…"
+		}
+		if msg == "" {
+			return nil, status, fmt.Errorf("poll failed: HTTP %d", status)
+		}
+		return nil, status, fmt.Errorf("poll failed: HTTP %d: %s", status, msg)
 	}
 	var job Job
 	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
-		return nil, fmt.Errorf("decode job: %w", err)
+		return nil, status, fmt.Errorf("decode job: %w", err)
 	}
-	return &job, nil
+	return &job, status, nil
 }
 
 // SendHeartbeat updates last_seen, reports the runner's current status,
 // advertises supported capabilities, and identifies the runner's OS/arch/version.
-// Returns the runner's org_id from the server.
-func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarch, version string) (string, error) {
+// Returns the runner's org_id from the server and the HTTP status code (0 if no response).
+func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarch, version string) (orgID string, httpStatus int, err error) {
 	resp, err := c.do("POST", "/api/runner/heartbeat", map[string]interface{}{
 		"status":       status,
 		"capabilities": capabilities,
@@ -124,20 +135,29 @@ func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarc
 		"version":      version,
 	})
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("HTTP %d from /api/runner/heartbeat", resp.StatusCode)
+	httpStatus = resp.StatusCode
+	if httpStatus >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		msg := strings.TrimSpace(string(b))
+		if len(msg) > 400 {
+			msg = msg[:400] + "…"
+		}
+		if msg == "" {
+			return "", httpStatus, fmt.Errorf("HTTP %d from /api/runner/heartbeat", httpStatus)
+		}
+		return "", httpStatus, fmt.Errorf("HTTP %d from /api/runner/heartbeat: %s", httpStatus, msg)
 	}
 	var body struct {
 		OK    bool   `json:"ok"`
 		OrgID string `json:"orgId"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", nil // best-effort; don't fail heartbeat on decode error
+		return "", httpStatus, nil // best-effort; don't fail heartbeat on decode error
 	}
-	return body.OrgID, nil
+	return body.OrgID, httpStatus, nil
 }
 
 // StreamOutput sends a streaming output chunk to the API for broadcast to the UI.

@@ -40,7 +40,7 @@ Double-click the binary (macOS or Windows GUI build) or run it without arguments
 
 **Step 1 — Connect & Register**
 - Enter your API URL, Organization ID, and a name for this runner (defaults to your hostname).
-- Click "Connect & Register". The runner calls `POST /api/runners/register` and saves credentials to `~/.workflowfiesta/credentials.env`.
+- Click "Connect & Register". The runner calls `POST /api/runner/register` and saves credentials to `~/.workflowfiesta/credentials.env`.
 
 **Step 2 — Local Permissions**
 - Choose an approval mode: prompt for every job, prompt for risky operations (default), or never prompt.

@@ -18,7 +18,7 @@ import (
 
 func TestCallRegisterAPI_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/runners/register" {
+		if r.URL.Path != "/api/runner/register" {
 			http.NotFound(w, r)
 			return
 		}
@@ -88,8 +88,8 @@ func TestCallRegisterAPI_ConnectionRefused(t *testing.T) {
 
 func TestCallRegisterAPI_TrailingSlashStripped(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the path is exactly /api/runners/register (no double slash).
-		if r.URL.Path != "/api/runners/register" {
+		// Verify the path is exactly /api/runner/register (no double slash).
+		if r.URL.Path != "/api/runner/register" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusCreated)

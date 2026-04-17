@@ -231,7 +231,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	confirmTimeoutEntry := widget.NewEntry()
 	confirmTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.ConfirmTimeout))
 	confirmTimeoutHint := canvas.NewText(
-		"Seconds to wait for your approval before cancelling the job (default: 120 s).",
+		"How long the approval dialog waits for you before the job is auto-denied (default: 120 s).",
 		colorMuted,
 	)
 	confirmTimeoutHint.TextSize = 10
@@ -240,13 +240,13 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	maxTimeoutEntry := widget.NewEntry()
 	maxTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.MaxTimeout))
 	maxTimeoutHint := canvas.NewText(
-		"Maximum time (in seconds) a single job may run before being terminated (default: 180 s).",
+		"Upper limit on how long any single job may run before it is stopped (default: 180 s).",
 		colorMuted,
 	)
 	maxTimeoutHint.TextSize = 10
 
 	// Sound on approval
-	soundCheck := widget.NewCheck("Play a sound when an approval request arrives", nil)
+	soundCheck := widget.NewCheck("Play sound on approval request", nil)
 	soundCheck.SetChecked(cfgDefaults.SoundOnApproval)
 
 	// Allowed paths
@@ -669,17 +669,17 @@ func makeLabeledEntryInfo(label string, entry *widget.Entry, hint *canvas.Text, 
 	)
 }
 
-// callRegisterAPI posts to /api/runners/register and returns the result.
+// callRegisterAPI posts to /api/runner/register and returns the result.
 // environmentID is optional; if empty the server auto-creates a new environment.
 func callRegisterAPI(apiURL, name, orgID, environmentID string) (*RegistrationResult, error) {
 	apiURL = strings.TrimRight(apiURL, "/")
-	reqBody := map[string]string{"name": name, "org_id": orgID}
+	reqBody := map[string]string{"name": name, "orgUid": orgID}
 	if environmentID != "" {
 		reqBody["environment_id"] = environmentID
 	}
 	bodyBytes, _ := json.Marshal(reqBody)
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Post(apiURL+"/api/runners/register", "application/json", bytes.NewReader(bodyBytes))
+	resp, err := client.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, friendlyNetworkError(err, apiURL)
 	}
@@ -691,7 +691,7 @@ func callRegisterAPI(apiURL, name, orgID, environmentID string) (*RegistrationRe
 	}
 
 	var payload struct {
-		ID            string `json:"id"`
+		ID            string `json:"uid"`
 		Token         string `json:"token"`
 		EnvironmentID string `json:"environment_id"`
 	}
@@ -699,7 +699,13 @@ func callRegisterAPI(apiURL, name, orgID, environmentID string) (*RegistrationRe
 		return nil, fmt.Errorf("unexpected response from server — is this a WorkflowFiesta instance?")
 	}
 	if payload.ID == "" || payload.Token == "" {
-		return nil, fmt.Errorf("server returned an incomplete response (missing id or token)")
+		raw := strings.TrimSpace(string(data))
+		if raw == "" {
+			raw = "(empty body)"
+		} else if len(raw) > 2048 {
+			raw = raw[:2048] + "…"
+		}
+		return nil, fmt.Errorf("server returned an incomplete response (missing id or token): %s", raw)
 	}
 	return &RegistrationResult{
 		RunnerID:      payload.ID,
@@ -749,7 +755,7 @@ func friendlyHTTPError(status int, body []byte) error {
 	case 401, 403:
 		return fmt.Errorf("access denied (HTTP %d) — this server may require authentication", status)
 	case 404:
-		return fmt.Errorf("endpoint not found — is the API URL correct? (%s)", "/api/runners/register")
+		return fmt.Errorf("endpoint not found — is the API URL correct? (%s)", "/api/runner/register")
 	case 409:
 		return fmt.Errorf("a runner with this name already exists — choose a different runner name")
 	case 500:

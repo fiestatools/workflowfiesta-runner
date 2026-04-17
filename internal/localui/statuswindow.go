@@ -61,7 +61,7 @@ type jobRecord struct {
 // ── StatusWindow ──────────────────────────────────────────────────────────────
 
 // StatusWindow is a small always-visible window showing runner status and logs.
-// SetConnected/SetIdle/SetJobRunning/AppendLog implement runner.StatusSink and
+// SetConnected/SetIdle/SetJobRunning/AppendLog/ReportHeartbeat implement runner.StatusSink and
 // are safe to call from any goroutine.
 type StatusWindow struct {
 	win fyne.Window
@@ -77,6 +77,9 @@ type StatusWindow struct {
 	statSuccess *canvas.Text
 	statFailed  *canvas.Text
 	statUptime  *canvas.Text
+
+	// Last POST /api/runner/heartbeat
+	heartbeatStatus *canvas.Text
 
 	// Active job card (shown only when running)
 	jobCardOuter   *fyne.Container
@@ -162,6 +165,7 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	content := container.NewVBox(
 		sw.buildHeader(),
 		sw.buildStatsStrip(),
+		sw.buildHeartbeatStrip(),
 		sw.buildCTABanner(),
 		sw.buildJobCard(),
 		sw.buildRecentJobs(),
@@ -279,6 +283,25 @@ func (sw *StatusWindow) buildStatsStrip() fyne.CanvasObject {
 	bg.StrokeColor = colorBorder
 	bg.StrokeWidth = 1
 	return container.NewStack(bg, cells)
+}
+
+func (sw *StatusWindow) buildHeartbeatStrip() fyne.CanvasObject {
+	title := canvas.NewText("LAST HEARTBEAT (POST /api/runner/heartbeat)", colorLabel)
+	title.TextSize = 9
+	title.TextStyle = fyne.TextStyle{Bold: true}
+
+	sw.heartbeatStatus = canvas.NewText("—", colorMuted)
+	sw.heartbeatStatus.TextSize = 10
+	sw.heartbeatStatus.TextStyle = fyne.TextStyle{Monospace: true}
+
+	inner := container.NewVBox(
+		container.NewPadded(container.NewWithoutLayout(title)),
+		container.NewPadded(container.NewWithoutLayout(sw.heartbeatStatus)),
+	)
+	bg := canvas.NewRectangle(colorSurface)
+	bg.StrokeColor = colorBorder
+	bg.StrokeWidth = 1
+	return container.NewStack(bg, inner)
 }
 
 func (sw *StatusWindow) buildJobCard() fyne.CanvasObject {
@@ -600,6 +623,28 @@ func (sw *StatusWindow) SetJobComplete(jobID, image string, exitCode int) {
 func (sw *StatusWindow) AppendLog(chunk string) {
 	fmt.Fprint(os.Stdout, chunk)
 	sw.appendToLog(chunk)
+}
+
+// ReportHeartbeat updates the last-heartbeat strip and mirrors failures into the OUTPUT pane.
+func (sw *StatusWindow) ReportHeartbeat(httpStatus int, summary string) {
+	ts := time.Now().Format("15:04:05")
+	line := formatHeartbeatStatusLine(httpStatus, summary, ts)
+	fyne.Do(func() {
+		if sw.heartbeatStatus != nil {
+			sw.heartbeatStatus.Text = line
+			sw.heartbeatStatus.Refresh()
+		}
+	})
+	if httpStatus == 0 || httpStatus >= 400 {
+		sw.appendToLog("[heartbeat] " + line + "\n")
+	}
+}
+
+func formatHeartbeatStatusLine(httpStatus int, summary, ts string) string {
+	if httpStatus == 0 {
+		return summary + " · " + ts
+	}
+	return fmt.Sprintf("HTTP %d · %s · %s", httpStatus, summary, ts)
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────

@@ -89,7 +89,7 @@ WorkflowFiesta API
        │  returns (exitCode int, err error)
        ▼
   StatusSink(s)  (cliSink or StatusWindow)
-       └─ SetJobRunning / AppendLog / SetJobComplete / SetIdle
+       └─ ReportHeartbeat / SetJobRunning / AppendLog / SetJobComplete / SetIdle
 ```
 
 ---

@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -130,6 +131,18 @@ func (s *cliSink) AppendLog(chunk string) {
 	fmt.Fprint(os.Stdout, chunk)
 }
 
+func (s *cliSink) ReportHeartbeat(httpStatus int, summary string) {
+	ts := time.Now().Format("15:04:05")
+	switch {
+	case httpStatus == 0:
+		fmt.Printf("%s[heartbeat]%s %s · %s\n", ansiGray, ansiReset, summary, ts)
+	case httpStatus >= 400:
+		fmt.Printf("%s[heartbeat]%s HTTP %d · %s · %s\n", ansiRed, ansiReset, httpStatus, summary, ts)
+	default:
+		fmt.Printf("%s[heartbeat]%s HTTP %d · %s · %s\n", ansiGray, ansiReset, httpStatus, summary, ts)
+	}
+}
+
 func truncateCLI(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s
@@ -186,10 +199,10 @@ var registerCmd = &cobra.Command{
 
 		body, _ := json.Marshal(map[string]string{
 			"name":   name,
-			"org_id": orgID,
+			"orgUid": orgID,
 		})
 
-		resp, err := http.Post(apiURL+"/api/runners/register", "application/json", bytes.NewReader(body))
+		resp, err := http.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(body))
 		if err != nil {
 			return fmt.Errorf("registration request failed: %w", err)
 		}

@@ -24,9 +24,12 @@ func TestClient_PollNextJob_NoJob(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	job, err := client.PollNextJob()
+	job, status, err := client.PollNextJob()
 	if err != nil {
 		t.Fatalf("PollNextJob failed: %v", err)
+	}
+	if status != 204 {
+		t.Errorf("expected status 204, got %d", status)
 	}
 	if job != nil {
 		t.Errorf("expected nil job, got %+v", job)
@@ -47,9 +50,12 @@ func TestClient_PollNextJob_WithJob(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	job, err := client.PollNextJob()
+	job, status, err := client.PollNextJob()
 	if err != nil {
 		t.Fatalf("PollNextJob failed: %v", err)
+	}
+	if status != 200 {
+		t.Errorf("expected status 200, got %d", status)
 	}
 	if job == nil {
 		t.Fatal("expected a job, got nil")
@@ -76,9 +82,12 @@ func TestSendHeartbeat_SendsCapabilities(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	_, err := client.SendHeartbeat("idle", []string{"tool_dispatch", "script_library"}, "linux", "amd64", "v0.7.0")
+	_, status, err := client.SendHeartbeat("idle", []string{"tool_dispatch", "script_library"}, "linux", "amd64", "v0.7.0")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if status != 200 {
+		t.Errorf("expected HTTP 200, got %d", status)
 	}
 
 	caps, ok := captured["capabilities"].([]interface{})
@@ -104,7 +113,7 @@ func TestSendHeartbeat_SendsOSArch(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	_, err := client.SendHeartbeat("busy", []string{}, "windows", "amd64", "v0.7.0")
+	_, _, err := client.SendHeartbeat("busy", []string{}, "windows", "amd64", "v0.7.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,9 +136,12 @@ func TestSendHeartbeat_ReturnsOrgID(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	orgID, err := client.SendHeartbeat("idle", []string{}, "linux", "amd64", "dev")
+	orgID, status, err := client.SendHeartbeat("idle", []string{}, "linux", "amd64", "dev")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if status != 200 {
+		t.Errorf("expected HTTP 200, got %d", status)
 	}
 	if orgID != "org-abc" {
 		t.Errorf("expected orgId=org-abc, got %q", orgID)
@@ -143,9 +155,12 @@ func TestSendHeartbeat_HTTP400_ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	_, err := client.SendHeartbeat("idle", nil, "", "", "")
+	_, status, err := client.SendHeartbeat("idle", nil, "", "", "")
 	if err == nil {
 		t.Error("expected error for HTTP 400, got nil")
+	}
+	if status != 400 {
+		t.Errorf("expected HTTP 400, got %d", status)
 	}
 }
 
