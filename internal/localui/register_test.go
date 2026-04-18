@@ -4,6 +4,7 @@ package localui_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,24 +19,38 @@ import (
 
 func TestCallRegisterAPI_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/runners/register" {
+		if r.URL.Path != "/api/runner/register" {
 			http.NotFound(w, r)
 			return
 		}
+		// Verify the request body shape
+		body, _ := io.ReadAll(r.Body)
+		var req map[string]string
+		_ = json.Unmarshal(body, &req)
+		if req["code"] == "" {
+			t.Errorf("request body missing 'code' field: %s", body)
+		}
+		if req["name"] == "" {
+			t.Errorf("request body missing 'name' field: %s", body)
+		}
+
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{
-			"id":    "runner-abc-123",
-			"token": "tok_super_secret",
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"uid":            "runner-abc-123",
+			"token":          "tok_super_secret",
+			"orgUid":         "org-xyz-789",
+			"name":           "my-runner",
+			"environmentUid": "env-456",
 		})
 	}))
 	defer srv.Close()
 
-	result, err := localui.RegisterAPI(srv.URL, "my-runner", "org-001", "")
+	result, err := localui.RegisterAPI(srv.URL, "RNR-fakecode", "my-runner")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.RunnerID != "runner-abc-123" {
-		t.Errorf("RunnerID = %q, want %q", result.RunnerID, "runner-abc-123")
+	if result.RunnerUID != "runner-abc-123" {
+		t.Errorf("RunnerUID = %q, want %q", result.RunnerUID, "runner-abc-123")
 	}
 	if result.Token != "tok_super_secret" {
 		t.Errorf("Token = %q, want %q", result.Token, "tok_super_secret")
@@ -43,41 +58,48 @@ func TestCallRegisterAPI_Success(t *testing.T) {
 	if result.RunnerName != "my-runner" {
 		t.Errorf("RunnerName = %q, want %q", result.RunnerName, "my-runner")
 	}
+	if result.OrgUID != "org-xyz-789" {
+		t.Errorf("OrgUID = %q, want %q", result.OrgUID, "org-xyz-789")
+	}
+	if result.EnvironmentUID != "env-456" {
+		t.Errorf("EnvironmentUID = %q, want %q", result.EnvironmentUID, "env-456")
+	}
 	if result.APIURL != srv.URL {
 		t.Errorf("APIURL = %q, want %q", result.APIURL, srv.URL)
 	}
 }
 
-func TestCallRegisterAPI_ServerError(t *testing.T) {
+func TestCallRegisterAPI_FriendlyErrorFromServer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "organization not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid or expired registration code"})
 	}))
 	defer srv.Close()
 
-	_, err := localui.RegisterAPI(srv.URL, "runner", "bad-org", "")
+	_, err := localui.RegisterAPI(srv.URL, "RNR-bad", "runner")
 	if err == nil {
-		t.Fatal("expected error for non-201 response")
+		t.Fatal("expected error for 400 response")
 	}
-	if !strings.Contains(err.Error(), "endpoint not found") && !strings.Contains(err.Error(), "404") {
-		t.Errorf("error should indicate not found, got: %v", err)
+	if !strings.Contains(err.Error(), "expired") && !strings.Contains(err.Error(), "Invalid") {
+		t.Errorf("error should surface server message, got: %v", err)
 	}
 }
 
 func TestCallRegisterAPI_InvalidJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("not json"))
+		_, _ = w.Write([]byte("not json"))
 	}))
 	defer srv.Close()
 
-	_, err := localui.RegisterAPI(srv.URL, "runner", "org", "")
+	_, err := localui.RegisterAPI(srv.URL, "RNR-x", "runner")
 	if err == nil {
 		t.Fatal("expected error for invalid JSON response")
 	}
 }
 
 func TestCallRegisterAPI_ConnectionRefused(t *testing.T) {
-	_, err := localui.RegisterAPI("http://localhost:19999", "runner", "org", "")
+	_, err := localui.RegisterAPI("http://localhost:19999", "RNR-x", "runner")
 	if err == nil {
 		t.Fatal("expected error for unreachable server")
 	}
@@ -88,19 +110,36 @@ func TestCallRegisterAPI_ConnectionRefused(t *testing.T) {
 
 func TestCallRegisterAPI_TrailingSlashStripped(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the path is exactly /api/runners/register (no double slash).
-		if r.URL.Path != "/api/runners/register" {
+		// Verify the path is exactly /api/runner/register (no double slash).
+		if r.URL.Path != "/api/runner/register" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"id": "x", "token": "y"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"uid": "x", "token": "y"})
 	}))
 	defer srv.Close()
 
 	// API URL with trailing slash — should still work.
-	_, err := localui.RegisterAPI(srv.URL+"/", "runner", "org", "")
+	_, err := localui.RegisterAPI(srv.URL+"/", "RNR-x", "runner")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCallRegisterAPI_FallsBackToBodyName(t *testing.T) {
+	// When the server doesn't echo back a name, the runner keeps the one it sent.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{"uid": "x", "token": "y"})
+	}))
+	defer srv.Close()
+
+	r, err := localui.RegisterAPI(srv.URL, "RNR-x", "supplied-name")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.RunnerName != "supplied-name" {
+		t.Errorf("RunnerName = %q, want %q", r.RunnerName, "supplied-name")
 	}
 }
 
@@ -111,7 +150,7 @@ func TestWriteCredentials_ContentsCorrect(t *testing.T) {
 	credPath := filepath.Join(dir, "credentials.env")
 
 	r := &localui.RegistrationResult{
-		RunnerID:   "id-001",
+		RunnerUID:  "id-001",
 		Token:      "tok_abc",
 		RunnerName: "my-runner",
 		APIURL:     "http://localhost:3001",
@@ -142,7 +181,7 @@ func TestWriteCredentials_FileMode(t *testing.T) {
 	dir := t.TempDir()
 	credPath := filepath.Join(dir, "credentials.env")
 
-	r := &localui.RegistrationResult{Token: "tok", RunnerID: "id", RunnerName: "n", APIURL: "http://x"}
+	r := &localui.RegistrationResult{Token: "tok", RunnerUID: "id", RunnerName: "n", APIURL: "http://x"}
 	if err := localui.WriteCredentials(credPath, r); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +195,7 @@ func TestWriteCredentials_CreatesParentDir(t *testing.T) {
 	dir := t.TempDir()
 	credPath := filepath.Join(dir, "sub", "credentials.env")
 
-	r := &localui.RegistrationResult{Token: "t", RunnerID: "i", RunnerName: "n", APIURL: "u"}
+	r := &localui.RegistrationResult{Token: "t", RunnerUID: "i", RunnerName: "n", APIURL: "u"}
 	if err := localui.WriteCredentials(credPath, r); err != nil {
 		t.Fatalf("WriteCredentials with nested path: %v", err)
 	}
@@ -169,8 +208,8 @@ func TestWriteCredentials_HasExportPrefix(t *testing.T) {
 	dir := t.TempDir()
 	credPath := filepath.Join(dir, "credentials.env")
 
-	r := &localui.RegistrationResult{Token: "t", RunnerID: "i", RunnerName: "n", APIURL: "u"}
-	localui.WriteCredentials(credPath, r)
+	r := &localui.RegistrationResult{Token: "t", RunnerUID: "i", RunnerName: "n", APIURL: "u"}
+	_ = localui.WriteCredentials(credPath, r)
 
 	data, _ := os.ReadFile(credPath)
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
