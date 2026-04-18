@@ -58,9 +58,9 @@ func RunAutoLaunch(configPath string, startFn func(*config.Config)) {
 
 // showFirstRunWizard opens a 3-step wizard:
 //
-//	Step 0 — Connect & Register
-//	Step 1 — Local permissions
-//	Step 2 — "Starting…" transition (calls startFn, hides wizard)
+//	Step 1 — Connect & Register
+//	Step 2 — Local permissions
+//	Step 3 — "Starting…" transition (calls startFn, hides wizard)
 //
 // Uses win.Show() — NOT ShowAndRun — so the caller owns the event loop.
 func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Config)) {
@@ -129,7 +129,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 
 	// ── step bodies ───────────────────────────────────────────────────────────
 
-	// Step 0: Connect & Register (single-field flow)
+	// Step 1 of 3: Connect & Register (single-field flow)
 	defaultAPIURL := os.Getenv("WORKFLOWFIESTA_API_URL")
 	if defaultAPIURL == "" {
 		defaultAPIURL = config.DefaultAPIURL
@@ -223,7 +223,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	}
 
 	step0 := container.NewVBox(
-		makeStepHeading("Welcome to WorkflowFiesta", "Paste your one-time registration code. The code embeds your organization, so this is all you need."),
+		makeStepHeading("Step 1: Welcome to WorkflowFiesta", "Paste your one-time registration code. The code embeds your organization, so this is all you need."),
 		makeFieldItem("Registration Code", codeEntry),
 		container.NewHBox(getCodeLink),
 		connectBtn,
@@ -232,7 +232,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		advancedBody,
 	)
 
-	// Step 1: Local permissions
+	// Step 2 of 3: Local permissions
 	confirmRadio := widget.NewRadioGroup(
 		[]string{"Always (every job)", "Risky operations only (recommended)", "Never"},
 		nil,
@@ -246,14 +246,14 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	networkRadio.SetSelected("Allow all (recommended)")
 
 	step1 := container.NewVBox(
-		makeStepHeading("Local Permissions", "Control what scripts can do on this machine."),
+		makeStepHeading("Step 2: Local Permissions", "Control what scripts can do on this machine."),
 		makeSectionLabel("Approval Prompt"),
 		confirmRadio,
 		makeSectionLabel("Network Access"),
 		networkRadio,
 	)
 
-	// Step 2: Launching (transition screen)
+	// Step 3 of 3: Launching (transition screen)
 	launchTitle := canvas.NewText("Runner is starting…", colorText)
 	launchTitle.TextSize = 14
 	launchTitle.TextStyle = fyne.TextStyle{Bold: true}
@@ -308,8 +308,8 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		default:
 			localCfg.Network = "all"
 		}
-		if regResult.EnvironmentID != "" {
-			localCfg.EnvironmentID = regResult.EnvironmentID
+		if regResult.EnvironmentUID != "" {
+			localCfg.EnvironmentID = regResult.EnvironmentUID
 		}
 
 		if err := localconfig.Save(localCfg, configPath); err != nil {
@@ -328,7 +328,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		cfg := &config.Config{
 			APIURL:       regResult.APIURL,
 			Token:        regResult.Token,
-			RunnerID:     regResult.RunnerID,
+			RunnerID:     regResult.RunnerUID,
 			Name:         regResult.RunnerName,
 			ExecutorType: "local",
 			LocalConfig:  localCfg,

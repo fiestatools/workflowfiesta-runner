@@ -367,7 +367,7 @@ var registerLocalCmd = &cobra.Command{
 		}
 
 		fmt.Printf("\nRunner registered!\n")
-		fmt.Printf("Runner ID : %s\n", result.RunnerID)
+		fmt.Printf("Runner UID: %s\n", result.RunnerUID)
 		fmt.Printf("Runner    : %s\n", result.RunnerName)
 		fmt.Printf("\nCredentials saved to ~/.workflowfiesta/credentials.env\n")
 		fmt.Printf("Start the runner with:\n\n  source ~/.workflowfiesta/credentials.env\n  workflowfiesta-runner run-local\n\n")

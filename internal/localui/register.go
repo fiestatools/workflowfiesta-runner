@@ -130,7 +130,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		saveBtn.Refresh()
 	}
 
-	// ── Step 0: Connect & Register ───────────────────────────────────────────
+	// ── Step 1 of 4: Connect & Register ──────────────────────────────────────
 	// Default API URL: env override > production SaaS. Self-hosted users open
 	// "Advanced" to override. The vast majority of users never touch it.
 	defaultAPIURL := os.Getenv("WORKFLOWFIESTA_API_URL")
@@ -159,12 +159,12 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		}
 	}
 
-	advancedContent := container.NewVBox(
+	connectAdvancedContent := container.NewVBox(
 		makeFieldItem("API URL (only change for self-hosted)", apiURLEntry),
 		makeFieldItem("Runner Name", nameEntry),
 	)
-	advancedAccordion := widget.NewAccordion(
-		widget.NewAccordionItem("Advanced (self-hosted / custom name)", advancedContent),
+	connectAdvancedAccordion := widget.NewAccordion(
+		widget.NewAccordionItem("Advanced (self-hosted / custom name)", connectAdvancedContent),
 	)
 
 	regStatusText := canvas.NewText("", colorMuted)
@@ -215,16 +215,16 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	}
 
 	steps[0] = container.NewVBox(
-		makeStepHeading("Connect to WorkflowFiesta", "Paste your one-time registration code. The code embeds your organization, so this is all you need."),
+		makeStepHeading("Step 1: Connect to WorkflowFiesta", "Paste your one-time registration code. The code embeds your organization, so this is all you need."),
 		makeFieldItem("Registration Code", codeEntry),
 		container.NewHBox(getCodeLink),
 		registerBtn,
 		container.NewWithoutLayout(regStatusText),
 		widget.NewSeparator(),
-		advancedAccordion,
+		connectAdvancedAccordion,
 	)
 
-	// ── Step 1: Token display ─────────────────────────────────────────────────
+	// ── Step 2 of 4: Token display ────────────────────────────────────────────
 	tokenDisplay := widget.NewLabel("")
 	tokenDisplay.TextStyle = fyne.TextStyle{Monospace: true}
 	tokenDisplay.Wrapping = fyne.TextWrapWord
@@ -248,14 +248,14 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	savedNote.TextSize = 10
 
 	steps[1] = container.NewVBox(
-		makeStepHeading("Runner Registered!", "Save this token — it will not be shown again."),
+		makeStepHeading("Step 2: Runner Registered!", "Save this token — it will not be shown again."),
 		container.NewPadded(container.NewWithoutLayout(runnerIDDisplay)),
 		tokenBlock,
 		container.NewHBox(copyBtn, container.NewWithoutLayout(savedNote)),
 		widget.NewLabel("Click Next to configure local permissions."),
 	)
 
-	// ── Step 2: Local config ──────────────────────────────────────────────────
+	// ── Step 3 of 4: Local config ─────────────────────────────────────────────
 	cfgDefaults := localconfig.Default()
 
 	confirmRadio := widget.NewRadioGroup(
@@ -377,7 +377,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	// Collapsed by default — do not call advancedAccordion.Open(0)
 
 	steps[2] = container.NewVBox(
-		makeStepHeading("Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
+		makeStepHeading("Step 3: Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
 		makeSectionRow("Folder Access", win,
 			"Folder Access",
 			"Directories this runner can read from and write to.\n\nScripts that access paths outside this list will be blocked or require approval, depending on your Approval Prompt setting.\n\nAppend :ro to a path for read-only access (e.g. ~/Documents:ro)."),
@@ -406,7 +406,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		advancedAccordion,
 	)
 
-	// ── Step 3: Review & Save ─────────────────────────────────────────────────
+	// ── Step 4 of 4: Review & Save ────────────────────────────────────────────
 	summaryLabel := widget.NewLabel("")
 	summaryLabel.Wrapping = fyne.TextWrapWord
 	summaryBg := canvas.NewRectangle(colorTermBg)
@@ -423,7 +423,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	closeBtnInner.Hidden = true
 
 	steps[3] = container.NewVBox(
-		makeStepHeading("Review & Confirm", "Check your settings, then click Save & Start."),
+		makeStepHeading("Step 4: Review & Confirm", "Check your settings, then click Save & Start."),
 		summaryBlock,
 		savedBox,
 		container.NewPadded(closeBtnInner),
