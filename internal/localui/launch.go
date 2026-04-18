@@ -5,6 +5,8 @@ package localui
 import (
 	"fmt"
 	"image/color"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -56,9 +58,9 @@ func RunAutoLaunch(configPath string, startFn func(*config.Config)) {
 
 // showFirstRunWizard opens a 3-step wizard:
 //
-//	Step 0 — Connect & Register
-//	Step 1 — Local permissions
-//	Step 2 — "Starting…" transition (calls startFn, hides wizard)
+//	Step 1 — Connect & Register
+//	Step 2 — Local permissions
+//	Step 3 — "Starting…" transition (calls startFn, hides wizard)
 //
 // Uses win.Show() — NOT ShowAndRun — so the caller owns the event loop.
 func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Config)) {
@@ -127,16 +129,30 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 
 	// ── step bodies ───────────────────────────────────────────────────────────
 
-	// Step 0: Connect & Register
-	apiURLEntry := widget.NewEntry()
-	apiURLEntry.SetText("http://localhost:3001")
-	apiURLEntry.SetPlaceHolder("https://your-instance.workflowfiesta.com")
+	// Step 1 of 3: Connect & Register (single-field flow)
+	defaultAPIURL := os.Getenv("WORKFLOWFIESTA_API_URL")
+	if defaultAPIURL == "" {
+		defaultAPIURL = config.DefaultAPIURL
+	}
 
-	orgIDEntry := widget.NewEntry()
-	orgIDEntry.SetPlaceHolder("your-organization-id")
+	apiURLEntry := widget.NewEntry()
+	apiURLEntry.SetText(defaultAPIURL)
+	apiURLEntry.SetPlaceHolder("https://app.workflowfiesta.com")
+
+	codeEntry := widget.NewEntry()
+	codeEntry.SetPlaceHolder("RNR-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXX")
+	codeEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
 	nameEntry := widget.NewEntry()
 	nameEntry.SetText(defaultRunnerName())
+
+	getCodeURL, _ := url.Parse(strings.TrimRight(defaultAPIURL, "/") + "/runners/setup")
+	getCodeLink := widget.NewHyperlink("Don't have a code? Get one →", getCodeURL)
+	apiURLEntry.OnChanged = func(v string) {
+		if u, err := url.Parse(strings.TrimRight(strings.TrimSpace(v), "/") + "/runners/setup"); err == nil {
+			getCodeLink.SetURL(u)
+		}
+	}
 
 	regStatusText := canvas.NewText("", colorMuted)
 	regStatusText.TextSize = 12
@@ -147,23 +163,22 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		regStatusText.Refresh()
 	}
 
-	// Advanced Options (hidden by default)
-	envIDEntry := widget.NewEntry()
-	envIDEntry.SetPlaceHolder("leave blank to auto-create")
+	// Advanced Options (collapsed by default — for self-hosted users + custom names)
 	advancedBody := container.NewVBox(
 		widget.NewSeparator(),
-		makeFieldItem("Environment ID (optional)", envIDEntry),
+		makeFieldItem("API URL (only change for self-hosted)", apiURLEntry),
+		makeFieldItem("Runner Name (defaults to hostname)", nameEntry),
 	)
 	advancedBody.Hide()
 
-	advancedBtn := newButton("▸ Advanced Options", nil)
+	advancedBtn := newButton("▸ Advanced", nil)
 	advancedBtn.OnTapped = func() {
 		if advancedBody.Hidden {
 			advancedBody.Show()
-			advancedBtn.SetText("▾ Advanced Options")
+			advancedBtn.SetText("▾ Advanced")
 		} else {
 			advancedBody.Hide()
-			advancedBtn.SetText("▸ Advanced Options")
+			advancedBtn.SetText("▸ Advanced")
 		}
 	}
 
@@ -173,17 +188,23 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	connectBtn.Importance = widget.HighImportance
 	connectBtn.OnTapped = func() {
 		apiURL := strings.TrimRight(strings.TrimSpace(apiURLEntry.Text), "/")
-		orgID := strings.TrimSpace(orgIDEntry.Text)
+		code := strings.Join(strings.Fields(codeEntry.Text), "")
 		name := strings.TrimSpace(nameEntry.Text)
-		if apiURL == "" || orgID == "" || name == "" {
-			setRegStatus("All fields are required.", colorAmber)
+		if apiURL == "" {
+			setRegStatus("API URL is required.", colorAmber)
 			return
 		}
+		if code == "" {
+			setRegStatus("Registration code is required. Click 'Get one →' if you need one.", colorAmber)
+			return
+		}
+		if name == "" {
+			name = defaultRunnerName()
+		}
 		connectBtn.Disable()
-		setRegStatus("Connecting…", colorMuted)
-		envID := strings.TrimSpace(envIDEntry.Text)
+		setRegStatus("Registering…", colorMuted)
 		go func() {
-			r, err := callRegisterAPI(apiURL, name, orgID, envID)
+			r, err := callRegisterAPI(apiURL, code, name)
 			if err != nil {
 				fyne.Do(func() {
 					connectBtn.Enable()
@@ -202,17 +223,16 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	}
 
 	step0 := container.NewVBox(
-		makeStepHeading("Welcome to WorkflowFiesta", "Connect this machine as a self-hosted runner."),
-		makeFieldItem("API URL", apiURLEntry),
-		makeFieldItem("Organization ID", orgIDEntry),
-		makeFieldItem("Runner Name", nameEntry),
+		makeStepHeading("Step 1: Welcome to WorkflowFiesta", "Paste your one-time registration code. The code embeds your organization, so this is all you need."),
+		makeFieldItem("Registration Code", codeEntry),
+		container.NewHBox(getCodeLink),
 		connectBtn,
 		container.NewWithoutLayout(regStatusText),
 		advancedBtn,
 		advancedBody,
 	)
 
-	// Step 1: Local permissions
+	// Step 2 of 3: Local permissions
 	confirmRadio := widget.NewRadioGroup(
 		[]string{"Always (every job)", "Risky operations only (recommended)", "Never"},
 		nil,
@@ -226,14 +246,14 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	networkRadio.SetSelected("Allow all (recommended)")
 
 	step1 := container.NewVBox(
-		makeStepHeading("Local Permissions", "Control what scripts can do on this machine."),
+		makeStepHeading("Step 2: Local Permissions", "Control what scripts can do on this machine."),
 		makeSectionLabel("Approval Prompt"),
 		confirmRadio,
 		makeSectionLabel("Network Access"),
 		networkRadio,
 	)
 
-	// Step 2: Launching (transition screen)
+	// Step 3 of 3: Launching (transition screen)
 	launchTitle := canvas.NewText("Runner is starting…", colorText)
 	launchTitle.TextSize = 14
 	launchTitle.TextStyle = fyne.TextStyle{Bold: true}
@@ -288,8 +308,8 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		default:
 			localCfg.Network = "all"
 		}
-		if regResult.EnvironmentID != "" {
-			localCfg.EnvironmentID = regResult.EnvironmentID
+		if regResult.EnvironmentUID != "" {
+			localCfg.EnvironmentID = regResult.EnvironmentUID
 		}
 
 		if err := localconfig.Save(localCfg, configPath); err != nil {
@@ -308,7 +328,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		cfg := &config.Config{
 			APIURL:       regResult.APIURL,
 			Token:        regResult.Token,
-			RunnerID:     regResult.RunnerID,
+			RunnerID:     regResult.RunnerUID,
 			Name:         regResult.RunnerName,
 			ExecutorType: "local",
 			LocalConfig:  localCfg,

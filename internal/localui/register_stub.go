@@ -6,10 +6,12 @@ import "fmt"
 
 // RegistrationResult is defined here for nolocalui builds.
 type RegistrationResult struct {
-	RunnerID   string
-	Token      string
-	RunnerName string
-	APIURL     string
+	RunnerUID      string
+	Token          string
+	RunnerName     string
+	APIURL         string
+	OrgUID         string
+	EnvironmentUID string
 }
 
 // RunRegisterWizard is unavailable in nolocalui builds.

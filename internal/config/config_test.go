@@ -19,8 +19,8 @@ func TestLoad_Defaults(t *testing.T) {
 
 	cfg := config.Load()
 
-	if cfg.APIURL != "http://localhost:3001" {
-		t.Errorf("expected default API URL, got %s", cfg.APIURL)
+	if cfg.APIURL != config.DefaultAPIURL {
+		t.Errorf("expected default API URL %q, got %s", config.DefaultAPIURL, cfg.APIURL)
 	}
 	if cfg.DockerSocket != "/var/run/docker.sock" {
 		t.Errorf("expected default docker socket, got %s", cfg.DockerSocket)
