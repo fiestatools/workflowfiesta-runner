@@ -143,9 +143,8 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	codeEntry.SetPlaceHolder("RNR-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXX")
 	codeEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	nameEntry := widget.NewEntry()
-	nameEntry.SetText(defaultRunnerName())
-
+	// The runner's name was chosen at code-issuance time on the platform's
+	// /runners/setup page, so the binary doesn't need to ask for one.
 	getCodeURL, _ := url.Parse(strings.TrimRight(defaultAPIURL, "/") + "/runners/setup")
 	getCodeLink := widget.NewHyperlink("Don't have a code? Get one →", getCodeURL)
 	apiURLEntry.OnChanged = func(v string) {
@@ -163,11 +162,10 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		regStatusText.Refresh()
 	}
 
-	// Advanced Options (collapsed by default — for self-hosted users + custom names)
+	// Advanced Options (collapsed by default — for self-hosted users)
 	advancedBody := container.NewVBox(
 		widget.NewSeparator(),
 		makeFieldItem("API URL (only change for self-hosted)", apiURLEntry),
-		makeFieldItem("Runner Name (defaults to hostname)", nameEntry),
 	)
 	advancedBody.Hide()
 
@@ -189,7 +187,6 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	connectBtn.OnTapped = func() {
 		apiURL := strings.TrimRight(strings.TrimSpace(apiURLEntry.Text), "/")
 		code := strings.Join(strings.Fields(codeEntry.Text), "")
-		name := strings.TrimSpace(nameEntry.Text)
 		if apiURL == "" {
 			setRegStatus("API URL is required.", colorAmber)
 			return
@@ -198,13 +195,10 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			setRegStatus("Registration code is required. Click 'Get one →' if you need one.", colorAmber)
 			return
 		}
-		if name == "" {
-			name = defaultRunnerName()
-		}
 		connectBtn.Disable()
 		setRegStatus("Registering…", colorMuted)
 		go func() {
-			r, err := callRegisterAPI(apiURL, code, name)
+			r, err := callRegisterAPI(apiURL, code)
 			if err != nil {
 				fyne.Do(func() {
 					connectBtn.Enable()
