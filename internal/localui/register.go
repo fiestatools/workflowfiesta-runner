@@ -146,11 +146,9 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	codeEntry.SetPlaceHolder("RNR-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXX")
 	codeEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	nameEntry := widget.NewEntry()
-	nameEntry.SetText(defaultRunnerName())
-	nameEntry.SetPlaceHolder("my-laptop")
-
 	// "Get a code →" hyperlink that opens the setup page on the configured instance.
+	// The setup page asks the user to name the runner before issuing a code, so
+	// the runner binary doesn't need to collect a name itself.
 	getCodeURL, _ := url.Parse(strings.TrimRight(defaultAPIURL, "/") + "/runners/setup")
 	getCodeLink := widget.NewHyperlink("Don't have a code? Get one →", getCodeURL)
 	apiURLEntry.OnChanged = func(v string) {
@@ -161,10 +159,9 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 
 	connectAdvancedContent := container.NewVBox(
 		makeFieldItem("API URL (only change for self-hosted)", apiURLEntry),
-		makeFieldItem("Runner Name", nameEntry),
 	)
 	connectAdvancedAccordion := widget.NewAccordion(
-		widget.NewAccordionItem("Advanced (self-hosted / custom name)", connectAdvancedContent),
+		widget.NewAccordionItem("Advanced (self-hosted only)", connectAdvancedContent),
 	)
 
 	regStatusText := canvas.NewText("", colorMuted)
@@ -183,7 +180,6 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		apiURL := strings.TrimRight(strings.TrimSpace(apiURLEntry.Text), "/")
 		// Strip whitespace from pasted code; the parser also strips dashes.
 		code := strings.Join(strings.Fields(codeEntry.Text), "")
-		name := strings.TrimSpace(nameEntry.Text)
 		if apiURL == "" {
 			setRegStatus("API URL is required.", colorAmber)
 			return
@@ -192,13 +188,10 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 			setRegStatus("Registration code is required. Click 'Get one →' if you need one.", colorAmber)
 			return
 		}
-		if name == "" {
-			name = defaultRunnerName()
-		}
 		registerBtn.Disable()
 		setRegStatus("Registering…", colorMuted)
 		go func() {
-			r, err := callRegisterAPI(apiURL, code, name)
+			r, err := callRegisterAPI(apiURL, code)
 			if err != nil {
 				fyne.Do(func() {
 					registerBtn.Enable()
@@ -707,10 +700,13 @@ func makeLabeledEntryInfo(label string, entry *widget.Entry, hint *canvas.Text, 
 }
 
 // callRegisterAPI posts to /api/runner/register (UNAUTHENTICATED, code-based).
-// The code embeds the orgUid; the server resolves the tenant from it.
-func callRegisterAPI(apiURL, code, name string) (*RegistrationResult, error) {
+// The code embeds the orgUid AND the runner identity (name, environment, etc.)
+// — they were chosen at code-issuance time on the server side. The runner only
+// needs to send the code; the server returns the bearer token (= the code) and
+// the runner's name/uid/environment for the runner to persist locally.
+func callRegisterAPI(apiURL, code string) (*RegistrationResult, error) {
 	apiURL = strings.TrimRight(apiURL, "/")
-	reqBody := map[string]string{"code": code, "name": name}
+	reqBody := map[string]string{"code": code}
 	bodyBytes, _ := json.Marshal(reqBody)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(bodyBytes))
@@ -737,14 +733,10 @@ func callRegisterAPI(apiURL, code, name string) (*RegistrationResult, error) {
 	if payload.UID == "" || payload.Token == "" {
 		return nil, fmt.Errorf("server returned an incomplete response (missing uid or token)")
 	}
-	resolvedName := payload.Name
-	if resolvedName == "" {
-		resolvedName = name
-	}
 	return &RegistrationResult{
 		RunnerUID:      payload.UID,
 		Token:          payload.Token,
-		RunnerName:     resolvedName,
+		RunnerName:     payload.Name,
 		APIURL:         apiURL,
 		OrgUID:         payload.OrgUID,
 		EnvironmentUID: payload.EnvironmentUID,
@@ -820,12 +812,4 @@ func writeCredentials(credPath string, r *RegistrationResult) error {
 		r.APIURL, r.Token, r.RunnerUID, r.RunnerName,
 	)
 	return os.WriteFile(credPath, []byte(content), 0o600)
-}
-
-func defaultRunnerName() string {
-	host, err := os.Hostname()
-	if err != nil {
-		return "my-runner"
-	}
-	return host
 }

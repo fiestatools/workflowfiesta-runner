@@ -23,15 +23,15 @@ func TestCallRegisterAPI_Success(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		// Verify the request body shape
+		// Verify the request body shape — only `code` is sent now.
 		body, _ := io.ReadAll(r.Body)
 		var req map[string]string
 		_ = json.Unmarshal(body, &req)
 		if req["code"] == "" {
 			t.Errorf("request body missing 'code' field: %s", body)
 		}
-		if req["name"] == "" {
-			t.Errorf("request body missing 'name' field: %s", body)
+		if _, ok := req["name"]; ok {
+			t.Errorf("request body should not include 'name' (server holds the name): %s", body)
 		}
 
 		w.WriteHeader(http.StatusCreated)
@@ -39,13 +39,13 @@ func TestCallRegisterAPI_Success(t *testing.T) {
 			"uid":            "runner-abc-123",
 			"token":          "tok_super_secret",
 			"orgUid":         "org-xyz-789",
-			"name":           "my-runner",
+			"name":           "my-laptop",
 			"environmentUid": "env-456",
 		})
 	}))
 	defer srv.Close()
 
-	result, err := localui.RegisterAPI(srv.URL, "RNR-fakecode", "my-runner")
+	result, err := localui.RegisterAPI(srv.URL, "RNR-fakecode")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -55,8 +55,8 @@ func TestCallRegisterAPI_Success(t *testing.T) {
 	if result.Token != "tok_super_secret" {
 		t.Errorf("Token = %q, want %q", result.Token, "tok_super_secret")
 	}
-	if result.RunnerName != "my-runner" {
-		t.Errorf("RunnerName = %q, want %q", result.RunnerName, "my-runner")
+	if result.RunnerName != "my-laptop" {
+		t.Errorf("RunnerName = %q, want %q", result.RunnerName, "my-laptop")
 	}
 	if result.OrgUID != "org-xyz-789" {
 		t.Errorf("OrgUID = %q, want %q", result.OrgUID, "org-xyz-789")
@@ -76,7 +76,7 @@ func TestCallRegisterAPI_FriendlyErrorFromServer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := localui.RegisterAPI(srv.URL, "RNR-bad", "runner")
+	_, err := localui.RegisterAPI(srv.URL, "RNR-bad")
 	if err == nil {
 		t.Fatal("expected error for 400 response")
 	}
@@ -92,14 +92,14 @@ func TestCallRegisterAPI_InvalidJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := localui.RegisterAPI(srv.URL, "RNR-x", "runner")
+	_, err := localui.RegisterAPI(srv.URL, "RNR-x")
 	if err == nil {
 		t.Fatal("expected error for invalid JSON response")
 	}
 }
 
 func TestCallRegisterAPI_ConnectionRefused(t *testing.T) {
-	_, err := localui.RegisterAPI("http://localhost:19999", "RNR-x", "runner")
+	_, err := localui.RegisterAPI("http://localhost:19999", "RNR-x")
 	if err == nil {
 		t.Fatal("expected error for unreachable server")
 	}
@@ -120,26 +120,9 @@ func TestCallRegisterAPI_TrailingSlashStripped(t *testing.T) {
 	defer srv.Close()
 
 	// API URL with trailing slash — should still work.
-	_, err := localui.RegisterAPI(srv.URL+"/", "RNR-x", "runner")
+	_, err := localui.RegisterAPI(srv.URL+"/", "RNR-x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCallRegisterAPI_FallsBackToBodyName(t *testing.T) {
-	// When the server doesn't echo back a name, the runner keeps the one it sent.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]string{"uid": "x", "token": "y"})
-	}))
-	defer srv.Close()
-
-	r, err := localui.RegisterAPI(srv.URL, "RNR-x", "supplied-name")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if r.RunnerName != "supplied-name" {
-		t.Errorf("RunnerName = %q, want %q", r.RunnerName, "supplied-name")
 	}
 }
 

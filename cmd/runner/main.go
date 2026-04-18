@@ -178,14 +178,14 @@ var registerCmd = &cobra.Command{
 	Long: `Register this machine as a self-hosted runner.
 
 Get a code by visiting your WorkflowFiesta instance → Runners → "Set up a runner",
-or by asking any platform agent in chat: "create a runner registration code".
+or by asking any platform agent in chat: "create a runner registration code". The
+runner's name was already chosen at code-issuance time and shows up in the runners
+list immediately.
 
-The code embeds your organization, so you only need ONE thing: the code.
-Runner name defaults to this machine's hostname.`,
+The code embeds your organization, so you only need ONE thing: the code.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		code, _ := cmd.Flags().GetString("code")
 		apiURL, _ := cmd.Flags().GetString("api-url")
-		name, _ := cmd.Flags().GetString("name")
 
 		if code == "" {
 			return fmt.Errorf("--code is required (get one from your WorkflowFiesta instance → Runners → Set up a runner)")
@@ -194,15 +194,8 @@ Runner name defaults to this machine's hostname.`,
 			apiURL = config.DefaultAPIURL
 		}
 		apiURL = strings.TrimRight(apiURL, "/")
-		if name == "" {
-			if h, err := os.Hostname(); err == nil {
-				name = h
-			} else {
-				name = "unnamed-runner"
-			}
-		}
 
-		body, _ := json.Marshal(map[string]string{"code": code, "name": name})
+		body, _ := json.Marshal(map[string]string{"code": code})
 
 		resp, err := http.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(body))
 		if err != nil {
@@ -378,7 +371,6 @@ var registerLocalCmd = &cobra.Command{
 func init() {
 	registerCmd.Flags().String("code", "", "One-time registration code from WorkflowFiesta (required)")
 	registerCmd.Flags().String("api-url", "", "WorkflowFiesta API URL (defaults to "+config.DefaultAPIURL+", or $WORKFLOWFIESTA_API_URL)")
-	registerCmd.Flags().String("name", "", "Runner name (defaults to this machine's hostname)")
 
 	runLocalCmd.Flags().Bool("headless", false, "Skip GUI; use terminal y/n prompts (for SSH/CI use)")
 	runLocalCmd.Flags().String("config", "", "Path to runner.yaml (default: ~/.workflowfiesta/runner.yaml)")
