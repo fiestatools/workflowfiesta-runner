@@ -111,7 +111,8 @@ jobs:
           name: windows-gui
           path: workflowfiesta-runner-windows-amd64-gui.exe
 
-  build-darwin-headless:
+  # macOS headless variants (cross-compiled from Linux — pure Go, no cgo).
+  build-darwin-headless-amd64:
     name: macOS headless (amd64)
     runs-on: ubuntu-latest
     steps:
@@ -120,7 +121,6 @@ jobs:
         with:
           go-version: stable
       - name: Build
-        # Cross-compile from Linux — pure Go, no cgo needed for headless.
         env:
           CGO_ENABLED: "0"
           GOOS: darwin
@@ -132,14 +132,46 @@ jobs:
             ./cmd/runner
       - uses: actions/upload-artifact@v4
         with:
-          name: darwin-headless
+          name: darwin-headless-amd64
           path: workflowfiesta-runner-darwin-amd64
 
+  build-darwin-headless-arm64:
+    name: macOS headless (arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          go build -tags nolocalui \
+            -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
+            -o workflowfiesta-runner-darwin-arm64 \
+            ./cmd/runner
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-headless-arm64
+          path: workflowfiesta-runner-darwin-arm64
+
+  # macOS GUI: Fyne needs the native Cocoa toolchain (cgo against Apple
+  # frameworks), which doesn't cross-compile from Linux. We must use a hosted
+  # macOS runner.
+  #
+  # Apple Silicon (arm64) is the only macOS runner type with reliable scheduling
+  # since GitHub started deprecating Intel runners in late 2025 — `macos-13`
+  # (Intel/amd64) jobs commonly queue indefinitely. macos-latest currently
+  # points at macos-15 (arm64). We build arm64 only and skip Intel: most users
+  # of recent Macs are on Apple Silicon, and headless amd64 above still covers
+  # CI / server use cases that would otherwise want an Intel binary.
   build-darwin-gui:
-    name: macOS GUI (amd64)
-    # macOS runner: Fyne's GUI build needs the native Cocoa toolchain (cgo
-    # against Apple frameworks), which doesn't cross-compile from Linux.
-    runs-on: macos-13
+    name: macOS GUI (arm64)
+    runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -149,20 +181,22 @@ jobs:
         env:
           CGO_ENABLED: "1"
           GOOS: darwin
-          GOARCH: amd64
+          GOARCH: arm64
         run: |
           go build \
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
-            -o workflowfiesta-runner-darwin-amd64-gui \
+            -o workflowfiesta-runner-darwin-arm64-gui \
             ./cmd/runner
       - uses: actions/upload-artifact@v4
         with:
           name: darwin-gui
-          path: workflowfiesta-runner-darwin-amd64-gui
+          path: workflowfiesta-runner-darwin-arm64-gui
 
   # ── publish ─────────────────────────────────────────────────────────────────
   # All build jobs above run in parallel — there are no `needs:` between them.
-  # `publish` is the only job that waits, gathering every artifact.
+  # `publish` waits for them but uses `if: ${{ !cancelled() }}` so it runs even
+  # if a single platform build fails or is unavailable. We'd rather ship 5 of 6
+  # binaries than ship none at all.
 
   publish:
     name: Publish release assets
@@ -171,14 +205,22 @@ jobs:
       - build-linux-gui
       - build-windows-headless
       - build-windows-gui
-      - build-darwin-headless
+      - build-darwin-headless-amd64
+      - build-darwin-headless-arm64
       - build-darwin-gui
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+          # Don't fail if a build job was skipped — we still want to ship the
+          # artifacts that DID succeed. Build failures show up in the run UI.
+
+      - name: List artifacts
+        working-directory: dist
+        run: ls -la
 
       - name: Generate checksums
         working-directory: dist
@@ -188,4 +230,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          fail_on_unmatched_files: true
+          # We don't pin a list of files — we ship whatever the build matrix
+          # produced. fail_on_unmatched_files is irrelevant when files is a
+          # glob, but explicitly false in case the glob ever returns nothing.
+          fail_on_unmatched_files: false
