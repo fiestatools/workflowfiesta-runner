@@ -111,7 +111,58 @@ jobs:
           name: windows-gui
           path: workflowfiesta-runner-windows-amd64-gui.exe
 
+  build-darwin-headless:
+    name: macOS headless (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build
+        # Cross-compile from Linux — pure Go, no cgo needed for headless.
+        env:
+          CGO_ENABLED: "0"
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build -tags nolocalui \
+            -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
+            -o workflowfiesta-runner-darwin-amd64 \
+            ./cmd/runner
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-headless
+          path: workflowfiesta-runner-darwin-amd64
+
+  build-darwin-gui:
+    name: macOS GUI (amd64)
+    # macOS runner: Fyne's GUI build needs the native Cocoa toolchain (cgo
+    # against Apple frameworks), which doesn't cross-compile from Linux.
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build \
+            -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
+            -o workflowfiesta-runner-darwin-amd64-gui \
+            ./cmd/runner
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-gui
+          path: workflowfiesta-runner-darwin-amd64-gui
+
   # ── publish ─────────────────────────────────────────────────────────────────
+  # All build jobs above run in parallel — there are no `needs:` between them.
+  # `publish` is the only job that waits, gathering every artifact.
 
   publish:
     name: Publish release assets
@@ -120,6 +171,8 @@ jobs:
       - build-linux-gui
       - build-windows-headless
       - build-windows-gui
+      - build-darwin-headless
+      - build-darwin-gui
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
