@@ -102,7 +102,6 @@ func (r *recordingSink) AppendLog(line string) {
 	r.logs = append(r.logs, line)
 }
 
-func (r *recordingSink) ReportHeartbeat(_ int, _ string) {}
 
 // ── Mock executor ─────────────────────────────────────────────────────────────
 

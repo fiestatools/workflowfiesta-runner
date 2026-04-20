@@ -31,9 +31,6 @@ type StatusSink interface {
 	SetJobRunning(jobID, image, scriptBlurb string)
 	SetJobComplete(jobID, image string, exitCode int)
 	AppendLog(line string)
-	// ReportHeartbeat is invoked after each POST /api/runner/heartbeat (startup + every ~30s).
-	// httpStatus is 0 if no HTTP response was received (transport error).
-	ReportHeartbeat(httpStatus int, summary string)
 }
 
 type Runner struct {
@@ -84,26 +81,22 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Send initial heartbeat so the API marks us online immediately.
 	// Response includes org_id — use it to namespace the script library and
 	// set X-Org-Id on all future requests for fast tenant routing.
-	orgID, hbStatus, err := r.client.SendHeartbeat("idle", RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
+	orgID, err := r.client.SendHeartbeat("idle", RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
 	if err != nil {
 		log.Warnf("[runner] initial heartbeat failed: %v", err)
-		r.notify(func(s StatusSink) { s.ReportHeartbeat(hbStatus, err.Error()) })
-	} else {
-		r.notify(func(s StatusSink) { s.ReportHeartbeat(hbStatus, heartbeatSummary(orgID)) })
-		if orgID != "" {
-			r.client.SetOrgID(orgID)
-			r.toolHandler.SetOrgID(orgID)
-			r.toolHandler.SetSyncer(r.client)
-			// Persist org_id to runner.yaml if it changed.
-			if r.cfg.LocalConfig != nil && r.cfg.LocalConfig.OrgID != orgID {
-				r.cfg.LocalConfig.OrgID = orgID
-				if saveErr := localconfig.Save(r.cfg.LocalConfig, localconfig.DefaultPath()); saveErr != nil {
-					log.Warnf("[runner] failed to persist org_id: %v", saveErr)
-				}
+	} else if orgID != "" {
+		r.client.SetOrgID(orgID)
+		r.toolHandler.SetOrgID(orgID)
+		r.toolHandler.SetSyncer(r.client)
+		// Persist org_id to runner.yaml if it changed.
+		if r.cfg.LocalConfig != nil && r.cfg.LocalConfig.OrgID != orgID {
+			r.cfg.LocalConfig.OrgID = orgID
+			if saveErr := localconfig.Save(r.cfg.LocalConfig, localconfig.DefaultPath()); saveErr != nil {
+				log.Warnf("[runner] failed to persist org_id: %v", saveErr)
 			}
-			// Pull server scripts on startup — bootstrap org library.
-			go r.syncServerScripts(orgID)
 		}
+		// Pull server scripts on startup — bootstrap org library.
+		go r.syncServerScripts(orgID)
 	}
 	r.notify(func(s StatusSink) { s.SetConnected(true) })
 
@@ -419,24 +412,9 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 				status = "busy"
 				return false // stop after first
 			})
-			orgID, hbStatus, err := r.client.SendHeartbeat(status, RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
-			if err != nil {
+			if _, err := r.client.SendHeartbeat(status, RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version); err != nil {
 				log.Warnf("[runner] heartbeat failed: %v", err)
-				r.notify(func(s StatusSink) { s.ReportHeartbeat(hbStatus, err.Error()) })
-				continue
 			}
-			if orgID != "" {
-				r.client.SetOrgID(orgID)
-				r.toolHandler.SetOrgID(orgID)
-			}
-			r.notify(func(s StatusSink) { s.ReportHeartbeat(hbStatus, heartbeatSummary(orgID)) })
 		}
 	}
-}
-
-func heartbeatSummary(orgID string) string {
-	if orgID == "" {
-		return "ok"
-	}
-	return "ok · org " + orgID
 }
