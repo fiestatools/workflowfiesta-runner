@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -131,18 +130,6 @@ func (s *cliSink) AppendLog(chunk string) {
 	fmt.Fprint(os.Stdout, chunk)
 }
 
-func (s *cliSink) ReportHeartbeat(httpStatus int, summary string) {
-	ts := time.Now().Format("15:04:05")
-	switch {
-	case httpStatus == 0:
-		fmt.Printf("%s[heartbeat]%s %s · %s\n", ansiGray, ansiReset, summary, ts)
-	case httpStatus >= 400:
-		fmt.Printf("%s[heartbeat]%s HTTP %d · %s · %s\n", ansiRed, ansiReset, httpStatus, summary, ts)
-	default:
-		fmt.Printf("%s[heartbeat]%s HTTP %d · %s · %s\n", ansiGray, ansiReset, httpStatus, summary, ts)
-	}
-}
-
 func truncateCLI(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s
@@ -187,20 +174,28 @@ var runCmd = &cobra.Command{
 
 var registerCmd = &cobra.Command{
 	Use:   "register",
-	Short: "Register a new runner with WorkflowFiesta",
+	Short: "Register this runner using a one-time code from WorkflowFiesta",
+	Long: `Register this machine as a self-hosted runner.
+
+Get a code by visiting your WorkflowFiesta instance → Runners → "Set up a runner",
+or by asking any platform agent in chat: "create a runner registration code". The
+runner's name was already chosen at code-issuance time and shows up in the runners
+list immediately.
+
+The code embeds your organization, so you only need ONE thing: the code.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		code, _ := cmd.Flags().GetString("code")
 		apiURL, _ := cmd.Flags().GetString("api-url")
-		name, _ := cmd.Flags().GetString("name")
-		orgID, _ := cmd.Flags().GetString("org-id")
 
-		if apiURL == "" || name == "" || orgID == "" {
-			return fmt.Errorf("--api-url, --name, and --org-id are required")
+		if code == "" {
+			return fmt.Errorf("--code is required (get one from your WorkflowFiesta instance → Runners → Set up a runner)")
 		}
+		if apiURL == "" {
+			apiURL = config.DefaultAPIURL
+		}
+		apiURL = strings.TrimRight(apiURL, "/")
 
-		body, _ := json.Marshal(map[string]string{
-			"name":   name,
-			"orgUid": orgID,
-		})
+		body, _ := json.Marshal(map[string]string{"code": code})
 
 		resp, err := http.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(body))
 		if err != nil {
@@ -210,21 +205,36 @@ var registerCmd = &cobra.Command{
 
 		data, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode != http.StatusCreated {
+			// Try to extract a friendly error message
+			var errBody struct {
+				Error string `json:"error"`
+			}
+			_ = json.Unmarshal(data, &errBody)
+			if errBody.Error != "" {
+				return fmt.Errorf("registration failed (%d): %s", resp.StatusCode, errBody.Error)
+			}
 			return fmt.Errorf("registration failed (%d): %s", resp.StatusCode, data)
 		}
 
-		var result map[string]interface{}
-		json.Unmarshal(data, &result)
+		var result struct {
+			UID            string `json:"uid"`
+			Token          string `json:"token"`
+			OrgUID         string `json:"orgUid"`
+			Name           string `json:"name"`
+			EnvironmentUID string `json:"environmentUid"`
+		}
+		if err := json.Unmarshal(data, &result); err != nil {
+			return fmt.Errorf("could not parse server response: %w", err)
+		}
 
-		fmt.Printf("Runner registered successfully!\n")
-		fmt.Printf("Runner ID: %s\n", result["id"])
-		fmt.Printf("Token: %s\n\n", result["token"])
-		fmt.Printf("Set environment variables:\n")
+		fmt.Printf("✓ Runner registered: %s\n", result.Name)
+		fmt.Printf("  UID: %s\n\n", result.UID)
+		fmt.Println("Set these environment variables (or save them to ~/.workflowfiesta/credentials.env):")
 		fmt.Printf("  export WORKFLOWFIESTA_API_URL=%s\n", apiURL)
-		fmt.Printf("  export WORKFLOWFIESTA_TOKEN=%s\n", result["token"])
-		fmt.Printf("  export WORKFLOWFIESTA_RUNNER_ID=%s\n", result["id"])
-		fmt.Printf("  export WORKFLOWFIESTA_RUNNER_NAME=%s\n\n", name)
-		fmt.Printf("Then run: workflowfiesta-runner run\n")
+		fmt.Printf("  export WORKFLOWFIESTA_TOKEN=%s\n", result.Token)
+		fmt.Printf("  export WORKFLOWFIESTA_RUNNER_ID=%s\n", result.UID)
+		fmt.Printf("  export WORKFLOWFIESTA_RUNNER_NAME=%s\n\n", result.Name)
+		fmt.Println("Then run: workflowfiesta-runner run")
 
 		return nil
 	},
@@ -350,7 +360,7 @@ var registerLocalCmd = &cobra.Command{
 		}
 
 		fmt.Printf("\nRunner registered!\n")
-		fmt.Printf("Runner ID : %s\n", result.RunnerID)
+		fmt.Printf("Runner UID: %s\n", result.RunnerUID)
 		fmt.Printf("Runner    : %s\n", result.RunnerName)
 		fmt.Printf("\nCredentials saved to ~/.workflowfiesta/credentials.env\n")
 		fmt.Printf("Start the runner with:\n\n  source ~/.workflowfiesta/credentials.env\n  workflowfiesta-runner run-local\n\n")
@@ -359,9 +369,8 @@ var registerLocalCmd = &cobra.Command{
 }
 
 func init() {
-	registerCmd.Flags().String("api-url", "", "WorkflowFiesta API URL")
-	registerCmd.Flags().String("name", "", "Runner name")
-	registerCmd.Flags().String("org-id", "", "Organization ID")
+	registerCmd.Flags().String("code", "", "One-time registration code from WorkflowFiesta (required)")
+	registerCmd.Flags().String("api-url", "", "WorkflowFiesta API URL (defaults to "+config.DefaultAPIURL+", or $WORKFLOWFIESTA_API_URL)")
 
 	runLocalCmd.Flags().Bool("headless", false, "Skip GUI; use terminal y/n prompts (for SSH/CI use)")
 	runLocalCmd.Flags().String("config", "", "Path to runner.yaml (default: ~/.workflowfiesta/runner.yaml)")

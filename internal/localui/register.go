@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,17 +24,19 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/platform"
 )
 
 // RegistrationResult holds the credentials returned from a successful registration.
 type RegistrationResult struct {
-	RunnerID      string
-	Token         string
-	RunnerName    string
-	APIURL        string
-	EnvironmentID string // auto-created or chosen environment
+	RunnerUID      string
+	Token          string
+	RunnerName     string
+	APIURL         string
+	OrgUID         string
+	EnvironmentUID string
 }
 
 // RunRegisterWizard opens the combined registration + local-config setup wizard.
@@ -127,17 +130,39 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		saveBtn.Refresh()
 	}
 
-	// ── Step 0: Connect & Register ───────────────────────────────────────────
+	// ── Step 1 of 4: Connect & Register ──────────────────────────────────────
+	// Default API URL: env override > production SaaS. Self-hosted users open
+	// "Advanced" to override. The vast majority of users never touch it.
+	defaultAPIURL := os.Getenv("WORKFLOWFIESTA_API_URL")
+	if defaultAPIURL == "" {
+		defaultAPIURL = config.DefaultAPIURL
+	}
+
 	apiURLEntry := widget.NewEntry()
-	apiURLEntry.SetText("http://localhost:3001")
-	apiURLEntry.SetPlaceHolder("https://your-instance.workflowfiesta.com")
+	apiURLEntry.SetText(defaultAPIURL)
+	apiURLEntry.SetPlaceHolder("https://app.workflowfiesta.com")
 
-	orgIDEntry := widget.NewEntry()
-	orgIDEntry.SetPlaceHolder("your-organization-id")
+	codeEntry := widget.NewEntry()
+	codeEntry.SetPlaceHolder("RNR-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXX")
+	codeEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	nameEntry := widget.NewEntry()
-	nameEntry.SetText(defaultRunnerName())
-	nameEntry.SetPlaceHolder("my-laptop")
+	// "Get a code →" hyperlink that opens the setup page on the configured instance.
+	// The setup page asks the user to name the runner before issuing a code, so
+	// the runner binary doesn't need to collect a name itself.
+	getCodeURL, _ := url.Parse(strings.TrimRight(defaultAPIURL, "/") + "/runners/setup")
+	getCodeLink := widget.NewHyperlink("Don't have a code? Get one →", getCodeURL)
+	apiURLEntry.OnChanged = func(v string) {
+		if u, err := url.Parse(strings.TrimRight(strings.TrimSpace(v), "/") + "/runners/setup"); err == nil {
+			getCodeLink.SetURL(u)
+		}
+	}
+
+	connectAdvancedContent := container.NewVBox(
+		makeFieldItem("API URL (only change for self-hosted)", apiURLEntry),
+	)
+	connectAdvancedAccordion := widget.NewAccordion(
+		widget.NewAccordionItem("Advanced (self-hosted only)", connectAdvancedContent),
+	)
 
 	regStatusText := canvas.NewText("", colorMuted)
 	regStatusText.TextSize = 12
@@ -153,16 +178,20 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 
 	registerBtn.OnTapped = func() {
 		apiURL := strings.TrimRight(strings.TrimSpace(apiURLEntry.Text), "/")
-		orgID := strings.TrimSpace(orgIDEntry.Text)
-		name := strings.TrimSpace(nameEntry.Text)
-		if apiURL == "" || orgID == "" || name == "" {
-			setRegStatus("All fields are required.", colorAmber)
+		// Strip whitespace from pasted code; the parser also strips dashes.
+		code := strings.Join(strings.Fields(codeEntry.Text), "")
+		if apiURL == "" {
+			setRegStatus("API URL is required.", colorAmber)
+			return
+		}
+		if code == "" {
+			setRegStatus("Registration code is required. Click 'Get one →' if you need one.", colorAmber)
 			return
 		}
 		registerBtn.Disable()
-		setRegStatus("Connecting…", colorMuted)
+		setRegStatus("Registering…", colorMuted)
 		go func() {
-			r, err := callRegisterAPI(apiURL, name, orgID, "")
+			r, err := callRegisterAPI(apiURL, code)
 			if err != nil {
 				fyne.Do(func() {
 					registerBtn.Enable()
@@ -172,22 +201,23 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 			}
 			regResult = r
 			fyne.Do(func() {
-				setRegStatus("Connected! Proceeding to next step…", colorSuccess)
+				setRegStatus("Registered! Proceeding to next step…", colorSuccess)
 				show(1)
 			})
 		}()
 	}
 
 	steps[0] = container.NewVBox(
-		makeStepHeading("Connect to WorkflowFiesta", "Enter your API URL and register this machine as a self-hosted runner."),
-		makeFieldItem("API URL", apiURLEntry),
-		makeFieldItem("Organization ID", orgIDEntry),
-		makeFieldItem("Runner Name", nameEntry),
+		makeStepHeading("Step 1: Connect to WorkflowFiesta", "Paste your one-time registration code. The code embeds your organization, so this is all you need."),
+		makeFieldItem("Registration Code", codeEntry),
+		container.NewHBox(getCodeLink),
 		registerBtn,
 		container.NewWithoutLayout(regStatusText),
+		widget.NewSeparator(),
+		connectAdvancedAccordion,
 	)
 
-	// ── Step 1: Token display ─────────────────────────────────────────────────
+	// ── Step 2 of 4: Token display ────────────────────────────────────────────
 	tokenDisplay := widget.NewLabel("")
 	tokenDisplay.TextStyle = fyne.TextStyle{Monospace: true}
 	tokenDisplay.Wrapping = fyne.TextWrapWord
@@ -211,14 +241,14 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	savedNote.TextSize = 10
 
 	steps[1] = container.NewVBox(
-		makeStepHeading("Runner Registered!", "Save this token — it will not be shown again."),
+		makeStepHeading("Step 2: Runner Registered!", "Save this token — it will not be shown again."),
 		container.NewPadded(container.NewWithoutLayout(runnerIDDisplay)),
 		tokenBlock,
 		container.NewHBox(copyBtn, container.NewWithoutLayout(savedNote)),
 		widget.NewLabel("Click Next to configure local permissions."),
 	)
 
-	// ── Step 2: Local config ──────────────────────────────────────────────────
+	// ── Step 3 of 4: Local config ─────────────────────────────────────────────
 	cfgDefaults := localconfig.Default()
 
 	confirmRadio := widget.NewRadioGroup(
@@ -340,7 +370,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	// Collapsed by default — do not call advancedAccordion.Open(0)
 
 	steps[2] = container.NewVBox(
-		makeStepHeading("Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
+		makeStepHeading("Step 3: Local Permissions", "Control what scripts can access and whether you're prompted for approval."),
 		makeSectionRow("Folder Access", win,
 			"Folder Access",
 			"Directories this runner can read from and write to.\n\nScripts that access paths outside this list will be blocked or require approval, depending on your Approval Prompt setting.\n\nAppend :ro to a path for read-only access (e.g. ~/Documents:ro)."),
@@ -369,7 +399,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		advancedAccordion,
 	)
 
-	// ── Step 3: Review & Save ─────────────────────────────────────────────────
+	// ── Step 4 of 4: Review & Save ────────────────────────────────────────────
 	summaryLabel := widget.NewLabel("")
 	summaryLabel.Wrapping = fyne.TextWrapWord
 	summaryBg := canvas.NewRectangle(colorTermBg)
@@ -386,7 +416,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	closeBtnInner.Hidden = true
 
 	steps[3] = container.NewVBox(
-		makeStepHeading("Review & Confirm", "Check your settings, then click Save & Start."),
+		makeStepHeading("Step 4: Review & Confirm", "Check your settings, then click Save & Start."),
 		summaryBlock,
 		savedBox,
 		container.NewPadded(closeBtnInner),
@@ -396,7 +426,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	nextBtn.OnTapped = func() {
 		if currentStep == 1 && regResult != nil {
 			tokenDisplay.SetText(regResult.Token)
-			runnerIDDisplay.Text = "Runner ID: " + regResult.RunnerID
+			runnerIDDisplay.Text = "Runner UID: " + regResult.RunnerUID
 			runnerIDDisplay.Refresh()
 		}
 		if currentStep == 2 {
@@ -669,14 +699,14 @@ func makeLabeledEntryInfo(label string, entry *widget.Entry, hint *canvas.Text, 
 	)
 }
 
-// callRegisterAPI posts to /api/runner/register and returns the result.
-// environmentID is optional; if empty the server auto-creates a new environment.
-func callRegisterAPI(apiURL, name, orgID, environmentID string) (*RegistrationResult, error) {
+// callRegisterAPI posts to /api/runner/register (UNAUTHENTICATED, code-based).
+// The code embeds the orgUid AND the runner identity (name, environment, etc.)
+// — they were chosen at code-issuance time on the server side. The runner only
+// needs to send the code; the server returns the bearer token (= the code) and
+// the runner's name/uid/environment for the runner to persist locally.
+func callRegisterAPI(apiURL, code string) (*RegistrationResult, error) {
 	apiURL = strings.TrimRight(apiURL, "/")
-	reqBody := map[string]string{"name": name, "orgUid": orgID}
-	if environmentID != "" {
-		reqBody["environment_id"] = environmentID
-	}
+	reqBody := map[string]string{"code": code}
 	bodyBytes, _ := json.Marshal(reqBody)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(bodyBytes))
@@ -691,28 +721,25 @@ func callRegisterAPI(apiURL, name, orgID, environmentID string) (*RegistrationRe
 	}
 
 	var payload struct {
-		ID            string `json:"uid"`
-		Token         string `json:"token"`
-		EnvironmentID string `json:"environment_id"`
+		UID            string `json:"uid"`
+		Token          string `json:"token"`
+		OrgUID         string `json:"orgUid"`
+		Name           string `json:"name"`
+		EnvironmentUID string `json:"environmentUid"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, fmt.Errorf("unexpected response from server — is this a WorkflowFiesta instance?")
 	}
-	if payload.ID == "" || payload.Token == "" {
-		raw := strings.TrimSpace(string(data))
-		if raw == "" {
-			raw = "(empty body)"
-		} else if len(raw) > 2048 {
-			raw = raw[:2048] + "…"
-		}
-		return nil, fmt.Errorf("server returned an incomplete response (missing id or token): %s", raw)
+	if payload.UID == "" || payload.Token == "" {
+		return nil, fmt.Errorf("server returned an incomplete response (missing uid or token)")
 	}
 	return &RegistrationResult{
-		RunnerID:      payload.ID,
-		Token:         payload.Token,
-		RunnerName:    name,
-		APIURL:        apiURL,
-		EnvironmentID: payload.EnvironmentID,
+		RunnerUID:      payload.UID,
+		Token:          payload.Token,
+		RunnerName:     payload.Name,
+		APIURL:         apiURL,
+		OrgUID:         payload.OrgUID,
+		EnvironmentUID: payload.EnvironmentUID,
 	}, nil
 }
 
@@ -749,9 +776,9 @@ func friendlyHTTPError(status int, body []byte) error {
 	switch status {
 	case 400:
 		if serverMsg != "" {
-			return fmt.Errorf("bad request: %s", serverMsg)
+			return fmt.Errorf("%s", serverMsg)
 		}
-		return fmt.Errorf("bad request — check your API URL and Organization ID")
+		return fmt.Errorf("invalid registration code — paste the full code (or click 'Get one →' for a fresh code)")
 	case 401, 403:
 		return fmt.Errorf("access denied (HTTP %d) — this server may require authentication", status)
 	case 404:
@@ -759,15 +786,10 @@ func friendlyHTTPError(status int, body []byte) error {
 	case 409:
 		return fmt.Errorf("a runner with this name already exists — choose a different runner name")
 	case 500:
-		// Try to surface the most useful detail from the server error.
-		raw := strings.TrimSpace(string(body))
-		if strings.Contains(raw, "org_id") || strings.Contains(raw, "organizations") {
-			return fmt.Errorf("organization not found — check your Organization ID in Settings → Organization on the web app")
-		}
 		if serverMsg != "" {
 			return fmt.Errorf("server error: %s", serverMsg)
 		}
-		return fmt.Errorf("server error (500) — check the API URL and Organization ID, then try again")
+		return fmt.Errorf("server error (500) — try again, or get a fresh registration code")
 	default:
 		if serverMsg != "" {
 			return fmt.Errorf("error %d: %s", status, serverMsg)
@@ -787,15 +809,7 @@ func writeCredentials(credPath string, r *RegistrationResult) error {
 	}
 	content := fmt.Sprintf(
 		"export WORKFLOWFIESTA_API_URL=%s\nexport WORKFLOWFIESTA_TOKEN=%s\nexport WORKFLOWFIESTA_RUNNER_ID=%s\nexport WORKFLOWFIESTA_RUNNER_NAME=%s\n",
-		r.APIURL, r.Token, r.RunnerID, r.RunnerName,
+		r.APIURL, r.Token, r.RunnerUID, r.RunnerName,
 	)
 	return os.WriteFile(credPath, []byte(content), 0o600)
-}
-
-func defaultRunnerName() string {
-	host, err := os.Hostname()
-	if err != nil {
-		return "my-runner"
-	}
-	return host
 }

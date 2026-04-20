@@ -10,6 +10,10 @@ import (
 	"workflowfiesta-runner/internal/localconfig"
 )
 
+// DefaultAPIURL is the production WorkflowFiesta SaaS endpoint. Self-hosted
+// instances should set WORKFLOWFIESTA_API_URL or pass --api-url explicitly.
+const DefaultAPIURL = "https://app.workflowfiesta.com"
+
 type Config struct {
 	APIURL              string
 	Token               string
@@ -17,13 +21,13 @@ type Config struct {
 	Name                string
 	DockerSocket        string
 	Labels              []string
-	ExecutorType        string // "docker", "kubernetes", or "local"
-	KubeNamespace       string // KUBERNETES_NAMESPACE
-	KubeImagePullSecret string // KUBERNETES_IMAGE_PULL_SECRET
-	LocalConfigPath     string // path to runner.yaml (local executor only)
+	ExecutorType        string                   // "docker", "kubernetes", or "local"
+	KubeNamespace       string                   // KUBERNETES_NAMESPACE
+	KubeImagePullSecret string                   // KUBERNETES_IMAGE_PULL_SECRET
+	LocalConfigPath     string                   // path to runner.yaml (local executor only)
 	LocalConfig         *localconfig.LocalConfig // loaded local config (set by run-local)
-	MaxConcurrentJobs   int    // max simultaneous jobs (0 → default 4)
-	Version             string // binary version (set from ldflags by main)
+	MaxConcurrentJobs   int                      // max simultaneous jobs (0 → default 4)
+	Version             string                   // binary version (set from ldflags by main)
 }
 
 // CredentialsFilePath returns the path to the auto-saved credentials file.
@@ -100,7 +104,7 @@ func Load() *Config {
 	}
 
 	cfg := &Config{
-		APIURL:              getEnv("WORKFLOWFIESTA_API_URL", "http://localhost:3001"),
+		APIURL:              getEnv("WORKFLOWFIESTA_API_URL", DefaultAPIURL),
 		Token:               os.Getenv("WORKFLOWFIESTA_TOKEN"),
 		RunnerID:            os.Getenv("WORKFLOWFIESTA_RUNNER_ID"),
 		Name:                getEnv("WORKFLOWFIESTA_RUNNER_NAME", "unnamed-runner"),
