@@ -2,7 +2,7 @@
 
 ## Overview
 
-workflowfiesta-runner is a self-hosted job execution agent written in Go. It connects to a WorkflowFiesta API instance over a persistent WebSocket, receives job dispatch messages, executes scripts in an isolated environment, and streams output back in real time. Three executor back-ends are supported: Docker, Kubernetes, and Local (direct host execution).
+workflowfiesta-runner is a self-hosted job execution agent written in Go. It talks to a WorkflowFiesta API instance over plain HTTPS — heartbeat and job-poll requests on short tickers, one-shot POSTs to stream output and report completion. There is no persistent socket. Three executor back-ends are supported: Docker, Kubernetes, and Local (direct host execution).
 
 The binary ships in two variants:
 - **Headless build** (`nolocalui` tag): for servers and CI pipelines. No GUI dependency.
@@ -19,7 +19,7 @@ workflowfiesta-runner/
 │       └── main.go          Entry point. Cobra root command, sub-commands, cliSink
 ├── internal/
 │   ├── api/
-│   │   └── client.go        WebSocket client: connect, listen, send helpers
+│   │   └── client.go        HTTP client: heartbeat, poll, report helpers
 │   ├── config/
 │   │   └── config.go        Config struct; env-var loading; credentials.env fallback
 │   ├── executor/
@@ -54,7 +54,7 @@ cmd/runner/main.go
   ├── internal/localconfig     ← runner.yaml schema
   ├── internal/localui         ← Fyne GUI (optional, gated by nolocalui tag)
   └── internal/runner
-        ├── internal/api        ← WebSocket client
+        ├── internal/api        ← HTTP client (heartbeat + poll + report)
         └── internal/executor
               ├── internal/localconfig
               └── internal/localui  ← approval gate for local executor
@@ -68,21 +68,19 @@ Key constraint: `internal/localui` must not import `internal/runner` to avoid a 
 
 ```
 WorkflowFiesta API
-       │  WebSocket /runner-ws
-       │  → { type: "job", jobId, dockerImage, script, envVars, timeoutSeconds }
+       │  every 3 s:  GET /api/runner/jobs/next
+       │  every 30 s: POST /api/runner/heartbeat
        ▼
-  api.Client.Listen()
-       │  → jobChan (buffered, 10)
-       ▼
-  runner.Run() dispatch loop
+  runner.Run() poll loop
+       │  PollNextJob() → Job (or nil)
        │  dedup via activeJobs sync.Map
        │  concurrency via semaphore (default 4)
        ▼
   runner.handleJob()
-       │  1. ReportJobClaimed  → API
-       │  2. executor.Execute() — runs script, streams outputChan
-       │  3. StreamOutput chunks → API  (concurrent with execution)
-       │  4. ReportJobComplete / ReportJobFailed → API
+       │  1. (tool job) handleToolJob  OR  (script job) executor.Execute()
+       │  2. StreamOutput chunks → POST /api/runner/jobs/:id/output (concurrent)
+       │  3. ReportJobComplete   → POST /api/runner/jobs/:id/complete
+       │     ReportJobFailed     → POST /api/runner/jobs/:id/fail
        ▼
   Executor (docker | kubernetes | local)
        │  stdout+stderr → outputChan<string>
@@ -111,9 +109,9 @@ The `nolocalui` build produces a smaller binary suitable for Docker containers a
 
 - One goroutine per active job (goroutine-per-request pattern).
 - A buffered channel (`semaphore`) caps concurrent jobs at `MaxConcurrentJobs` (default 4, overridable via `WORKFLOWFIESTA_MAX_CONCURRENT_JOBS`).
-- `sync.Map` (`activeJobs`) prevents duplicate execution when the API re-dispatches a job before the runner sends `job:claimed`.
-- The WebSocket read loop runs in a dedicated goroutine; writes are serialized by `api.Client.mu` mutex.
-- Heartbeat (application-level) and Ping (WebSocket-level) are sent every 30 s. Read deadline is extended to 75 s on each Pong receipt; a missed Pong triggers automatic reconnect.
+- `sync.Map` (`activeJobs`) prevents duplicate execution if the same `jobId` is returned by two polls (e.g. retry after a flaky network).
+- Two goroutines drive all outbound traffic: the 3 s job-poll loop in `Run()` and the 30 s heartbeat loop in `heartbeatLoop()`. `api.Client.SetOrgID` is the only shared-state write; it's guarded by the client's mutex.
+- Liveness is conveyed exclusively by the 30 s heartbeat POST. The backend considers a runner offline when `lastSeen` is older than ~90 s. There is no ping/pong.
 
 ---
 
@@ -134,7 +132,7 @@ Fyne requires the event loop on the main OS thread (mandatory on macOS). The pat
 |---|---|
 | `github.com/spf13/cobra` | CLI framework |
 | `github.com/sirupsen/logrus` | Structured logging |
-| `github.com/gorilla/websocket` | WebSocket client |
+| `net/http` (stdlib) | HTTP client for heartbeat / poll / job reporting |
 | `github.com/docker/docker` | Docker Engine API |
 | `k8s.io/client-go` | Kubernetes API |
 | `fyne.io/fyne/v2` | Cross-platform desktop GUI (GUI build only) |
