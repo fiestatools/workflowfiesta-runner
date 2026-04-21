@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -56,30 +57,32 @@ func RunAutoLaunch(configPath string, startFn func(*config.Config)) {
 	a.Run() // blocks; kept alive by status window / tray
 }
 
-// showFirstRunWizard opens a 3-step wizard:
+// showFirstRunWizard opens three numbered setup steps, then a non-numbered
+// "Starting…" transition (calls startFn, hides wizard).
 //
-//	Step 1 — Connect & Register
-//	Step 2 — Local permissions
-//	Step 3 — "Starting…" transition (calls startFn, hides wizard)
+//	Screen 0 — Connect & Register          → Step 1 of 3
+//	Screen 1 — Approval prompt & network  → Step 2 of 3
+//	Screen 2 — Timeouts, sound, paths     → Step 3 of 3
+//	Screen 3 — Starting… (not counted)
 //
 // Uses win.Show() — NOT ShowAndRun — so the caller owns the event loop.
 func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Config)) {
 	win := a.NewWindow("WorkflowFiesta · Setup")
-	win.Resize(fyne.NewSize(520, 460))
+	win.Resize(fyne.NewSize(520, 560))
 	win.CenterOnScreen()
 	win.SetCloseIntercept(func() { win.Hide(); QuitApp() })
 
-	const numSteps = 3
+	const numSetupSteps = 3
 	var currentStep int
 
-	// ── progress dots ─────────────────────────────────────────────────────────
-	dots := make([]*canvas.Rectangle, numSteps)
+	// ── progress dots (one per setup step; all filled on transition) ──────────
+	dots := make([]*canvas.Rectangle, numSetupSteps)
 	for i := range dots {
 		r := canvas.NewRectangle(colorBorder)
 		r.CornerRadius = 4
 		dots[i] = r
 	}
-	dotCells := make([]fyne.CanvasObject, numSteps)
+	dotCells := make([]fyne.CanvasObject, numSetupSteps)
 	for i, d := range dots {
 		dotCells[i] = container.New(layout.NewGridWrapLayout(fyne.NewSize(8, 8)), d)
 	}
@@ -90,19 +93,29 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 
 	bodyHolder := container.NewStack()
 
-	refreshDots := func(n int) {
+	// screenIndex 0–2 = setup; 3 = transition (all dots complete).
+	refreshDots := func(screenIndex int) {
 		for i, d := range dots {
+			var fill color.Color
+			var wide bool
 			switch {
-			case i < n:
-				d.FillColor = colorSuccess
-			case i == n:
-				d.FillColor = color.NRGBA{R: 59, G: 130, B: 246, A: 255}
+			case screenIndex >= numSetupSteps:
+				fill = colorSuccess
+				wide = false
+			case i < screenIndex:
+				fill = colorSuccess
+				wide = false
+			case i == screenIndex:
+				fill = color.NRGBA{R: 59, G: 130, B: 246, A: 255}
+				wide = true
 			default:
-				d.FillColor = colorBorder
+				fill = colorBorder
+				wide = false
 			}
+			d.FillColor = fill
 			d.Refresh()
 			sz := fyne.NewSize(8, 8)
-			if i == n {
+			if wide {
 				sz = fyne.NewSize(24, 8)
 			}
 			dotCells[i] = container.New(layout.NewGridWrapLayout(sz), d)
@@ -226,7 +239,9 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		advancedBody,
 	)
 
-	// Step 2 of 3: Local permissions
+	cfgDefaults := localconfig.Default()
+
+	// Step 2: Approval & network
 	confirmRadio := widget.NewRadioGroup(
 		[]string{"Always (every job)", "Risky operations only (recommended)", "Never"},
 		nil,
@@ -247,30 +262,92 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		networkRadio,
 	)
 
-	// Step 3 of 3: Launching (transition screen)
+	// Step 3: Timeouts, sound, allowed paths (matches Settings + register-local)
+	confirmTimeoutEntry := widget.NewEntry()
+	confirmTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.ConfirmTimeout))
+	confirmTimeoutHint := canvas.NewText(
+		"How long the approval dialog waits for you before the job is auto-denied.",
+		colorMuted,
+	)
+	confirmTimeoutHint.TextSize = 10
+
+	maxTimeoutEntry := widget.NewEntry()
+	maxTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.MaxTimeout))
+	maxTimeoutHint := canvas.NewText(
+		"Upper limit on how long any single job may run before it is stopped.",
+		colorMuted,
+	)
+	maxTimeoutHint.TextSize = 10
+
+	soundCheck := widget.NewCheck("Play sound on approval request", nil)
+	soundCheck.SetChecked(cfgDefaults.SoundOnApproval)
+
+	pathsEntry := widget.NewMultiLineEntry()
+	pathsEntry.SetPlaceHolder("One path per line, e.g.\n~/projects\n~/Documents:ro")
+	pathsEntry.SetText(strings.Join(cfgDefaults.AllowedPaths, "\n"))
+	pathsEntry.SetMinRowsVisible(3)
+	browseBtn := newButton("Browse…", func() {
+		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+			if err != nil || uri == nil {
+				return
+			}
+			current := pathsEntry.Text
+			if current != "" && current[len(current)-1] != '\n' {
+				current += "\n"
+			}
+			pathsEntry.SetText(current + uri.Path())
+		}, win)
+	})
+	pathHint := canvas.NewText("Append :ro for read-only access.", colorMuted)
+	pathHint.TextSize = 10
+
+	step2 := container.NewVBox(
+		makeStepHeading("Safety & folders", "Time limits for approvals and jobs, plus which directories scripts may use."),
+		makeSectionRow("Allowed paths", win,
+			"Allowed paths",
+			"Directories this runner may read and write. Jobs that touch paths outside this list can be blocked or require approval.\n\nAppend :ro for read-only (e.g. ~/Documents:ro)."),
+		pathsEntry,
+		container.NewHBox(browseBtn, container.NewWithoutLayout(pathHint)),
+		widget.NewSeparator(),
+		makeLabeledEntryInfo("Confirm timeout (seconds)", confirmTimeoutEntry, confirmTimeoutHint, win,
+			"Confirm timeout",
+			"Number of seconds the approval dialog stays open waiting for you.\n\nIf you do not choose Allow or Deny in time, the job is treated as denied. Default: 120 seconds."),
+		makeLabeledEntryInfo("Max timeout (seconds)", maxTimeoutEntry, maxTimeoutHint, win,
+			"Max timeout",
+			"Maximum seconds a job is allowed to run, including script execution. The runner stops the job if it runs longer than this cap. Default: 180 seconds."),
+		container.NewHBox(soundCheck, makeInfoBtn(win,
+			"Sound on approval",
+			"Plays a system notification sound when an approval dialog appears.\n\nUseful when the runner window is in the background.")),
+	)
+
+	// Transition: launching (not a numbered step)
 	launchTitle := canvas.NewText("Runner is starting…", colorText)
 	launchTitle.TextSize = 14
 	launchTitle.TextStyle = fyne.TextStyle{Bold: true}
 	launchSub := canvas.NewText("The status window will appear shortly.", colorMuted)
 	launchSub.TextSize = 12
 
-	step2 := container.NewCenter(container.NewVBox(
+	step3 := container.NewCenter(container.NewVBox(
 		container.NewWithoutLayout(launchTitle),
 		container.NewWithoutLayout(launchSub),
 	))
 
-	steps := []fyne.CanvasObject{step0, step1, step2}
+	steps := []fyne.CanvasObject{step0, step1, step2, step3}
 
 	setStep := func(n int) {
 		currentStep = n
-		stepCountLabel.Text = fmt.Sprintf("Step %d of 3", n+1)
+		if n < numSetupSteps {
+			stepCountLabel.Text = fmt.Sprintf("Step %d of %d", n+1, numSetupSteps)
+		} else {
+			stepCountLabel.Text = ""
+		}
 		stepCountLabel.Refresh()
 		refreshDots(n)
 		bodyHolder.Objects = []fyne.CanvasObject{steps[n]}
 		bodyHolder.Refresh()
-		backBtn.Hidden = (n == 0 || n == 2)
-		nextBtn.Hidden = (n != 0)
-		saveBtn.Hidden = (n != 1)
+		backBtn.Hidden = (n == 0 || n == 3)
+		nextBtn.Hidden = (n != 0 && n != 1)
+		saveBtn.Hidden = (n != 2)
 		backBtn.Refresh()
 		nextBtn.Refresh()
 		saveBtn.Refresh()
@@ -306,6 +383,23 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			localCfg.EnvironmentID = regResult.EnvironmentUID
 		}
 
+		if v, err := strconv.Atoi(strings.TrimSpace(confirmTimeoutEntry.Text)); err == nil && v > 0 {
+			localCfg.ConfirmTimeout = v
+		}
+		if v, err := strconv.Atoi(strings.TrimSpace(maxTimeoutEntry.Text)); err == nil && v > 0 {
+			localCfg.MaxTimeout = v
+		}
+		localCfg.SoundOnApproval = soundCheck.Checked
+		var paths []string
+		for _, line := range strings.Split(pathsEntry.Text, "\n") {
+			if strings.TrimSpace(line) != "" {
+				paths = append(paths, strings.TrimSpace(line))
+			}
+		}
+		if len(paths) > 0 {
+			localCfg.AllowedPaths = paths
+		}
+
 		if err := localconfig.Save(localCfg, configPath); err != nil {
 			dialog.ShowError(fmt.Errorf("save config: %w", err), win)
 			return
@@ -317,7 +411,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		}
 
 		// Show transition screen, start runner, hide wizard.
-		setStep(2)
+		setStep(3)
 
 		cfg := &config.Config{
 			APIURL:       regResult.APIURL,

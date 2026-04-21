@@ -114,7 +114,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.notify(func(s StatusSink) { s.SetConnected(false) })
 			return ctx.Err()
 		case <-pollTicker.C:
-			job, err := r.client.PollNextJob()
+			job, _, err := r.client.PollNextJob()
 			if err != nil {
 				log.Warnf("[runner] poll error: %v", err)
 				continue

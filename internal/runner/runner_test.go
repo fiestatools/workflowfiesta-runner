@@ -102,6 +102,7 @@ func (r *recordingSink) AppendLog(line string) {
 	r.logs = append(r.logs, line)
 }
 
+
 // ── Mock executor ─────────────────────────────────────────────────────────────
 
 type mockExecutor struct {

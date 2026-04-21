@@ -73,7 +73,7 @@ workflowfiesta-runner register --api-url <url> --name <name> --org-id <org-id>
 | `--org-id` | UUID of the organization to register under |
 
 **Behavior:**
-- POSTs to `<api-url>/api/runners/register` with `{ name, org_id }`.
+- POSTs to `<api-url>/api/runner/register` with `{ name, org_id }`.
 - On success, prints the runner ID, token, and the `export` commands to paste into a shell.
 - Does NOT write credentials to disk; the user must set environment variables manually.
 
@@ -148,7 +148,7 @@ The `version` variable is set at link time via `-ldflags "-X main.version=<tag>"
 When the binary is started with no arguments and the GUI is available:
 
 1. `config.Load()` is called. If a token is already present (env var or `credentials.env`), it loads `runner.yaml` and starts the runner immediately via `RunAutoLaunch`.
-2. If no token is found, `showFirstRunWizard` is shown — the 3-step in-app wizard (Connect & Register → Local Permissions → Starting…).
+2. If no token is found, `showFirstRunWizard` is shown — three setup steps (Connect & Register → Approval & network → Timeouts, sound & allowed paths), then a brief Starting… screen.
 3. After registration, the wizard transitions to a "starting" screen, opens the `StatusWindow` and system tray, and hides itself.
 
 This path is the primary UX for end-users on macOS and Windows who install the GUI app.

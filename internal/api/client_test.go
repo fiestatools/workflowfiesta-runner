@@ -24,9 +24,12 @@ func TestClient_PollNextJob_NoJob(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	job, err := client.PollNextJob()
+	job, status, err := client.PollNextJob()
 	if err != nil {
 		t.Fatalf("PollNextJob failed: %v", err)
+	}
+	if status != 204 {
+		t.Errorf("expected status 204, got %d", status)
 	}
 	if job != nil {
 		t.Errorf("expected nil job, got %+v", job)
@@ -47,9 +50,12 @@ func TestClient_PollNextJob_WithJob(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	job, err := client.PollNextJob()
+	job, status, err := client.PollNextJob()
 	if err != nil {
 		t.Fatalf("PollNextJob failed: %v", err)
+	}
+	if status != 200 {
+		t.Errorf("expected status 200, got %d", status)
 	}
 	if job == nil {
 		t.Fatal("expected a job, got nil")

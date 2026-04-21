@@ -261,7 +261,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	confirmTimeoutEntry := widget.NewEntry()
 	confirmTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.ConfirmTimeout))
 	confirmTimeoutHint := canvas.NewText(
-		"Seconds to wait for your approval before cancelling the job (default: 120 s).",
+		"How long the approval dialog waits for you before the job is auto-denied (default: 120 s).",
 		colorMuted,
 	)
 	confirmTimeoutHint.TextSize = 10
@@ -270,13 +270,13 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	maxTimeoutEntry := widget.NewEntry()
 	maxTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.MaxTimeout))
 	maxTimeoutHint := canvas.NewText(
-		"Maximum time (in seconds) a single job may run before being terminated (default: 180 s).",
+		"Upper limit on how long any single job may run before it is stopped (default: 180 s).",
 		colorMuted,
 	)
 	maxTimeoutHint.TextSize = 10
 
 	// Sound on approval
-	soundCheck := widget.NewCheck("Play a sound when an approval request arrives", nil)
+	soundCheck := widget.NewCheck("Play sound on approval request", nil)
 	soundCheck.SetChecked(cfgDefaults.SoundOnApproval)
 
 	// Allowed paths

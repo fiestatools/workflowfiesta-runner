@@ -163,7 +163,7 @@ The zero-CLI entry point for double-click launches.
 
 1. `config.Load()` — reads env vars and credentials file.
 2. If `Token != ""`: load `runner.yaml`, set `ExecutorType = "local"`, call `startFn(cfg)` (opens windows + tray).
-3. If `Token == ""`: show `showFirstRunWizard` (3-step in-app wizard). On completion, call `startFn(cfg)` and hide the wizard.
+3. If `Token == ""`: show `showFirstRunWizard` (3 numbered setup steps, then a short “Starting…” screen). On completion, call `startFn(cfg)` and hide the wizard.
 4. `a.Run()` blocks the main thread (Fyne event loop).
 
 `startFn` is a callback to avoid import cycles between `localui` and `runner`.
