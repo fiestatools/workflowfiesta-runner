@@ -154,7 +154,7 @@ On macOS/Windows, double-click the GUI binary. If no token is saved, the first-r
 | Variable | Default | Description |
 |---|---|---|
 | `WORKFLOWFIESTA_TOKEN` | — | Runner authentication token (required) |
-| `WORKFLOWFIESTA_API_URL` | `https://app.workflowfiesta.com` | Base URL of the WorkflowFiesta API |
+| `WORKFLOWFIESTA_API_URL` | `https://api.workflowfiesta.com` | Base URL of the WorkflowFiesta API |
 | `WORKFLOWFIESTA_RUNNER_ID` | — | Runner ID obtained via `register` |
 | `WORKFLOWFIESTA_RUNNER_NAME` | `unnamed-runner` | Human-readable name shown in the UI |
 | `WORKFLOWFIESTA_LABELS` | — | Comma-separated labels (e.g. `linux,x86_64,gpu`) for job routing |
