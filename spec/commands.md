@@ -19,8 +19,8 @@ workflowfiesta-runner run
 1. Loads config from environment variables and credentials file.
 2. Determines executor type: `CONTAINER_RUNTIME` → Kubernetes auto-detect (`KUBERNETES_SERVICE_HOST`) → Windows default (`local`) → `docker`.
 3. Creates a `runner.Runner` with a `cliSink` (ASCII output to stdout).
-4. Connects to the API via HTTP polling with automatic retry.
-5. Runs the job dispatch loop (see [api-client.md](./api-client.md) and [architecture.md](./architecture.md)).
+4. Sends the initial heartbeat to `/api/runner/heartbeat` and captures the returned `orgId`.
+5. Runs the HTTP poll loop — `GET /api/runner/jobs/next` every 3 s, heartbeat every 30 s (see [api-client.md](./api-client.md) and [architecture.md](./architecture.md)).
 6. Shuts down cleanly on SIGINT / SIGTERM.
 
 **Notes:**

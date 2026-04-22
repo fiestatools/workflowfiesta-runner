@@ -1,85 +1,99 @@
-# API Client — HTTP Polling Protocol
+# API Client — HTTP Protocol
 
-The runner communicates with the WorkflowFiesta API over HTTP REST endpoints using a poll-based model. The client lives in `internal/api/client.go`.
+The runner communicates with the WorkflowFiesta API over plain HTTPS. There is no persistent socket: the runner polls for work on a short interval, sends heartbeats on a longer interval, and issues one-shot POSTs to report progress and results. The client lives in `internal/api/client.go`.
 
 ---
 
 ## Connection
 
-**Base URL:** `<WORKFLOWFIESTA_API_URL>` (default: `https://app.workflowfiesta.com`)
+**Base URL:** `WORKFLOWFIESTA_API_URL` (e.g. `https://app.workflowfiesta.com`).
 
-**Authentication:**
-- HTTP header: `Authorization: Bearer <token>` on every request.
-- Optional header: `X-Org-Id: <orgId>` (set after first heartbeat response).
+**HTTP client:** single `*http.Client` with a **30-second timeout** per request.
 
-**HTTP client timeout:** 30 seconds per request.
+**Authentication:** every request carries:
+- `Authorization: Bearer <token>` — the runner's persistent token, issued at registration.
+- `X-Org-Id: <orgId>` — added on every request after the first heartbeat response supplies it. Lets the backend skip a cross-tenant lookup and route the request directly to the tenant DB. Safe to call concurrently via `Client.SetOrgID`.
 
----
+All request and response bodies are JSON.
 
-## Polling Loop
-
-The runner uses a simple poll loop (driven by `runner.Run()`):
-
-1. **Heartbeat** — every 30 s, POST to `/api/runner/heartbeat`.
-2. **Job poll** — every 3 s, GET `/api/runner/jobs/next`.
-3. When a job is returned, the runner executes it and reports results via POST endpoints.
-
-There is no persistent connection (no WebSocket). All communication is stateless HTTP request/response.
+**Auth failure:** `GET /api/runner/jobs/next` returning 401 is treated as fatal (`log.Fatal`) — the runner exits so an operator re-registers rather than spinning. Other 4xx/5xx responses return errors and the loop continues.
 
 ---
 
-## Heartbeat
+## Loops
 
-**Endpoint:** `POST /api/runner/heartbeat`
+Two goroutines drive all outbound traffic.
 
-Sent every 30 seconds. Reports the runner's status, capabilities, and build info. The server uses this to update `last_seen_at` and mark the runner online.
+### Poll loop (every 3 s)
 
-**Request body:**
-```json
-{
-  "status": "idle",
-  "capabilities": ["docker", "git"],
-  "os": "linux",
-  "arch": "amd64",
-  "version": "v1.2.0"
-}
+```
+for every 3 s:
+  GET /api/runner/jobs/next
+    → 204  → no job, continue
+    → 200  → Job JSON, dispatch to handleJob goroutine
+  (dedup via activeJobs sync.Map, cap concurrent jobs via semaphore)
 ```
 
-**Response body:**
-```json
-{
-  "ok": true,
-  "orgId": "org_abc123"
-}
+### Heartbeat loop (every 30 s)
+
+```
+for every 30 s:
+  POST /api/runner/heartbeat
+    body: { status, capabilities, os, arch, version }
+    → 200 { ok, orgId }
 ```
 
-The returned `orgId` is stored and sent as `X-Org-Id` on all subsequent requests.
+`status` is `"busy"` if any job is running, `"idle"` otherwise. `capabilities` advertises the feature flags the backend uses to decide which job types to route (see [architecture.md](./architecture.md)).
+
+There is no separate ping/pong, no reconnect logic, and no long-lived socket. If a single request fails the runner logs and retries on the next tick.
 
 ---
 
-## Job Polling
+## Endpoints
 
-**Endpoint:** `GET /api/runner/jobs/next`
+All paths are relative to `WORKFLOWFIESTA_API_URL`. All authenticated with the Bearer token.
 
-Called every 3 seconds to claim the next pending job.
+### Outgoing — runner lifecycle
 
-**Responses:**
-- `204 No Content` — no pending job.
-- `200 OK` — a job was claimed; body contains the job payload.
-- `401 Unauthorized` — token invalid; runner calls `log.Fatal` immediately.
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/runner/heartbeat` | Liveness + advertise capabilities/OS/arch/version. Response carries `orgId`. |
+| `GET` | `/api/runner/jobs/next` | Claim the next pending job for this runner. `204` = nothing queued. |
 
-**Job payload:**
+### Outgoing — job lifecycle
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/runner/jobs/:id/output` | Stream a stdout/stderr chunk. Sent once per chunk received from the executor. |
+| `POST` | `/api/runner/jobs/:id/complete` | Job finished cleanly (exit code may be non-zero). |
+| `POST` | `/api/runner/jobs/:id/fail` | Executor itself errored (e.g. image pull, timeout). |
+| `POST` | `/api/runner/jobs/:id/worktree` | Report the local git-worktree path for jobs that provisioned one. |
+| `POST` | `/api/runner/jobs/:id/approval-pending` | Local executor is waiting on an operator's y/n. |
+| `POST` | `/api/runner/jobs/:id/approval-resolved` | Operator approved or denied. |
+
+### Outgoing — script library
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/runner/scripts` | List script metadata for the org. |
+| `POST` | `/api/runner/scripts` | Upsert a script into the org library. |
+| `GET`  | `/api/runner/scripts/:name` | Fetch the full content of a named script. |
+
+---
+
+## Job Payload
+
+Returned from `GET /api/runner/jobs/next`:
+
 ```json
 {
   "jobId": "job_abc123",
   "dockerImage": "ubuntu:22.04",
   "script": "echo hello world",
-  "envVars": {
-    "MY_VAR": "value"
-  },
+  "envVars": { "MY_VAR": "value" },
   "timeoutSeconds": 300,
-  "toolName": "run_script",
-  "toolArgs": {},
+  "toolName": "",
+  "toolArgs": null,
   "git_repo_url": "",
   "git_ref": ""
 }
@@ -87,113 +101,14 @@ Called every 3 seconds to claim the next pending job.
 
 | Field | Type | Description |
 |---|---|---|
-| `jobId` | string | Unique job identifier |
-| `dockerImage` | string | Container image to use (Docker/Kubernetes) or execution context label (Local) |
-| `script` | string | Shell script to execute |
-| `envVars` | object | Environment variables to pass to the script |
-| `timeoutSeconds` | int | Job timeout; 0 defaults to 5 minutes |
-| `toolName` | string | Optional: tool that generated this job |
-| `toolArgs` | object | Optional: arguments passed to the tool |
-| `git_repo_url` | string | Optional: git repo to clone before execution |
-| `git_ref` | string | Optional: git ref to checkout |
-
----
-
-## Job Lifecycle Endpoints
-
-### Stream output
-
-**Endpoint:** `POST /api/runner/jobs/<jobId>/output`
-
-Sent for each chunk of stdout/stderr output during execution.
-
-```json
-{ "chunk": "hello world\n" }
-```
-
-### Report completion
-
-**Endpoint:** `POST /api/runner/jobs/<jobId>/complete`
-
-Sent when the script finishes (even if exit code != 0).
-
-```json
-{
-  "exitCode": 0,
-  "output": "hello world\n"
-}
-```
-
-### Report failure
-
-**Endpoint:** `POST /api/runner/jobs/<jobId>/fail`
-
-Sent when the executor itself fails (infrastructure error, image pull failure, timeout — not a non-zero exit code).
-
-```json
-{ "error": "timeout after 5m0s" }
-```
-
-### Report worktree path
-
-**Endpoint:** `POST /api/runner/jobs/<jobId>/worktree`
-
-Sent by the local executor to report the git worktree path on disk.
-
-```json
-{ "worktree_path": "/home/user/.workflowfiesta/worktrees/abc123" }
-```
-
-### Report approval pending
-
-**Endpoint:** `POST /api/runner/jobs/<jobId>/approval-pending`
-
-Sent by the local executor when a job requires human approval before execution.
-
-```json
-{ "runnerName": "my-laptop" }
-```
-
-### Report approval resolved
-
-**Endpoint:** `POST /api/runner/jobs/<jobId>/approval-resolved`
-
-Sent after the local operator approves or denies a job.
-
-```json
-{ "approved": true }
-```
-
----
-
-## Script Library Endpoints
-
-### List scripts
-
-**Endpoint:** `GET /api/runner/scripts`
-
-Returns metadata for all scripts in the org's library.
-
-### Get script
-
-**Endpoint:** `GET /api/runner/scripts/<name>`
-
-Returns `{ "content": "..." }` for a named script.
-
-### Push script
-
-**Endpoint:** `POST /api/runner/scripts`
-
-Upserts a script to the org's library.
-
-```json
-{
-  "name": "deploy.sh",
-  "content": "#!/bin/bash\n...",
-  "description": "Deploy to production",
-  "tags": ["deploy", "prod"]
-}
-```
+| `jobId` | string | Unique job identifier. |
+| `dockerImage` | string | Container image (Docker/K8s) or context label (Local). |
+| `script` | string | Shell script to execute. Empty when `toolName` is set. |
+| `envVars` | object | Environment variables to pass to the script / tool. |
+| `timeoutSeconds` | int | Job timeout; `0` defaults to 5 minutes on the runner side. |
+| `toolName` | string | Optional structured tool invocation (e.g. `read_file`, `run_local_script`). When set, the runner executes natively instead of spawning a subprocess. |
+| `toolArgs` | object | Arguments to the structured tool. |
+| `git_repo_url`, `git_ref` | string | Optional — if set and the runner advertised `git_worktrees`, it provisions a worktree and runs the job inside it. |
 
 ---
 
@@ -221,6 +136,17 @@ Used by the `register` CLI command. Accepts a one-time code and returns credenti
 
 ---
 
+## What the runner does NOT do
+
+For anyone coming to this code with the old WebSocket-era assumptions:
+
+- **No persistent socket.** No WebSocket, no Server-Sent Events, no long-polled connection.
+- **No Redis client.** The backend has a `runnerChannel(runnerId)` Redis topic, but the runner does not subscribe to it. Any push-to-runner mechanism built on that channel needs a bridge (see [dispatch-wakeup.md](./dispatch-wakeup.md)).
+- **No ping/pong.** Liveness is conveyed by the 30 s heartbeat POST; the backend considers a runner offline when its `lastSeen` is older than ~90 s.
+- **No reconnect logic.** Each request is independent; the 30 s `http.Client` timeout bounds stuck requests.
+
+---
+
 ## Thread Safety
 
 - `c.orgID` is protected by `c.mu` mutex.
@@ -233,16 +159,22 @@ Used by the `register` CLI command. Accepts a one-time code and returns credenti
 
 ```go
 func New(apiURL, token string) *Client
-func (c *Client) Connect(ctx context.Context) error
-func (c *Client) ConnectWithRetry(ctx context.Context)
-func (c *Client) Listen(ctx context.Context, jobChan chan<- Job)
-func (c *Client) SendHeartbeat() error
-func (c *Client) SendPing() error
-func (c *Client) ReportJobClaimed(jobID string) error
+func (c *Client) SetOrgID(orgID string)
+
+// Lifecycle
+func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarch, version string) (orgId string, err error)
+func (c *Client) PollNextJob() (*Job, error)
+
+// Job reporting
 func (c *Client) StreamOutput(jobID, chunk string) error
 func (c *Client) ReportJobComplete(jobID string, exitCode int, output string) error
 func (c *Client) ReportJobFailed(jobID, errMsg string) error
+func (c *Client) ReportWorktreePath(jobID, worktreePath string) error
 func (c *Client) ReportApprovalPending(jobID, runnerName string) error
 func (c *Client) ReportApprovalResolved(jobID string, approved bool) error
-func (c *Client) Close()
+
+// Script library
+func (c *Client) ListServerScripts() ([]ScriptMeta, error)
+func (c *Client) PushScript(name, content, description string, tags []string) error
+func (c *Client) GetScript(name string) (content string, err error)
 ```
