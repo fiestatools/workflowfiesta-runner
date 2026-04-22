@@ -25,19 +25,26 @@ The `local` executor runs scripts in a subprocess on the host, using layered sec
 
 ### 1. Register the runner
 
+In the WorkflowFiesta web UI, go to **Runners → "Set up a runner"**, name your runner, and copy the generated code (starts with `RNR-`).
+
 ```sh
-workflowfiesta-runner register \
-  --api-url https://your-instance.workflowfiesta.com \
-  --name my-laptop \
-  --org-id <your-org-id>
+workflowfiesta-runner register --code RNR-xxxxxxx-xxxxxxx-xxx
 ```
 
-Copy the `WORKFLOWFIESTA_TOKEN` and `WORKFLOWFIESTA_RUNNER_ID` from the output and export them:
+For self-hosted instances, add `--api-url`:
 
 ```sh
-export WORKFLOWFIESTA_API_URL=https://your-instance.workflowfiesta.com
-export WORKFLOWFIESTA_TOKEN=<token>
-export WORKFLOWFIESTA_RUNNER_ID=<runner-id>
+workflowfiesta-runner register \
+  --code RNR-xxxxxxx-xxxxxxx-xxx \
+  --api-url https://your-instance.workflowfiesta.com
+```
+
+Copy the environment variables from the output and export them:
+
+```sh
+export WORKFLOWFIESTA_API_URL=https://app.workflowfiesta.com
+export WORKFLOWFIESTA_TOKEN=<token from output>
+export WORKFLOWFIESTA_RUNNER_ID=<runner-id from output>
 export WORKFLOWFIESTA_RUNNER_NAME=my-laptop
 ```
 

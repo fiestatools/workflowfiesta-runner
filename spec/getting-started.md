@@ -6,8 +6,8 @@ This guide covers downloading the runner binary, registering with a WorkflowFies
 
 ## Prerequisites
 
-- A running WorkflowFiesta instance (self-hosted or cloud). Note the API URL (e.g. `http://localhost:3001` or `https://your-instance.workflowfiesta.com`).
-- Your organization ID (visible in the WorkflowFiesta web UI under Settings → Organization).
+- A running WorkflowFiesta instance (self-hosted or cloud). Note the API URL (e.g. `https://your-instance.workflowfiesta.com` or your self-hosted URL).
+- Access to the WorkflowFiesta web UI to generate a registration code (Runners → "Set up a runner").
 - For Docker mode: Docker Engine installed and the Docker socket accessible.
 - For Kubernetes mode: a kubeconfig with permission to create Jobs in the target namespace, or the runner running inside the cluster.
 - For Local mode: nothing extra; scripts run directly on the host.
@@ -16,14 +16,20 @@ This guide covers downloading the runner binary, registering with a WorkflowFies
 
 ## Download
 
-Pre-built binaries are published on the GitHub Releases page. Download the binary for your platform:
+Pre-built binaries are published on the [GitHub Releases page](https://github.com/testfiesta/workflowfiesta-runner/releases/latest). Download the binary for your platform:
 
-| Platform | Filename |
-|---|---|
-| Linux x86-64 (headless) | `workflowfiesta-runner-linux-amd64` |
-| macOS arm64 (GUI) | `workflowfiesta-runner-darwin-arm64` |
-| Windows x86-64 (GUI) | `workflowfiesta-runner-windows-amd64-gui.exe` |
-| Windows x86-64 (headless) | `workflowfiesta-runner-windows-amd64.exe` |
+| Platform | Variant | Filename |
+|---|---|---|
+| macOS Apple Silicon (arm64) | GUI | `workflowfiesta-runner-darwin-arm64-gui` |
+| macOS Apple Silicon (arm64) | Headless | `workflowfiesta-runner-darwin-arm64` |
+| macOS Intel (amd64) | GUI | `workflowfiesta-runner-darwin-amd64-gui` |
+| macOS Intel (amd64) | Headless | `workflowfiesta-runner-darwin-amd64` |
+| Linux x86-64 | GUI | `workflowfiesta-runner-linux-amd64-gui` |
+| Linux x86-64 | Headless | `workflowfiesta-runner-linux-amd64` |
+| Windows x86-64 | GUI | `workflowfiesta-runner-windows-amd64-gui.exe` |
+| Windows x86-64 | Headless | `workflowfiesta-runner-windows-amd64.exe` |
+
+> **GUI vs Headless:** GUI builds include a desktop wizard and system-tray icon (requires a display). Headless builds have no GUI dependencies and are ideal for servers and CI.
 
 Make the binary executable on Linux/macOS:
 
@@ -39,8 +45,8 @@ mv workflowfiesta-runner-linux-amd64 /usr/local/bin/workflowfiesta-runner
 Double-click the binary (macOS or Windows GUI build) or run it without arguments. The first-run wizard opens automatically.
 
 **Step 1 — Connect & Register**
-- Enter your API URL, Organization ID, and a name for this runner (defaults to your hostname).
-- Click "Connect & Register". The runner calls `POST /api/runner/register` and saves credentials to `~/.workflowfiesta/credentials.env`.
+- Paste the registration code from the web UI (Runners → "Set up a runner"). Optionally override the API URL for self-hosted instances.
+- Click "Connect & Register". The runner calls `POST /api/runner/register` with the code and saves credentials to `~/.workflowfiesta/credentials.env`.
 
 **Step 2 — Local Permissions**
 - Choose an approval mode: prompt for every job, prompt for risky operations (default), or never prompt.
@@ -55,42 +61,50 @@ To reopen the status window or quit: right-click the system tray / menu bar icon
 
 ## Option B: Command-Line Registration (Docker/Kubernetes/server)
 
-### 1. Register the runner
+### 1. Get a registration code
+
+In the WorkflowFiesta web UI, go to Runners → "Set up a runner", name your runner, and copy the generated code (starts with `RNR-`).
+
+### 2. Register the runner
+
+```bash
+workflowfiesta-runner register --code RNR-xxxxxxx-xxxxxxx-xxx
+```
+
+For self-hosted instances, add `--api-url`:
 
 ```bash
 workflowfiesta-runner register \
-  --api-url https://your-instance.workflowfiesta.com \
-  --name my-docker-runner \
-  --org-id your-org-id
+  --code RNR-xxxxxxx-xxxxxxx-xxx \
+  --api-url https://your-instance.workflowfiesta.com
 ```
 
 Output:
 ```
-Runner registered successfully!
-Runner ID: abc123
-Token: wfr_xxxxxxxxxxxx
+✓ Runner registered: my-docker-runner
+  UID: abc123
 
-Set environment variables:
-  export WORKFLOWFIESTA_API_URL=https://your-instance.workflowfiesta.com
-  export WORKFLOWFIESTA_TOKEN=wfr_xxxxxxxxxxxx
+Set these environment variables (or save them to ~/.workflowfiesta/credentials.env):
+  export WORKFLOWFIESTA_API_URL=https://api.workflowfiesta.com
+  export WORKFLOWFIESTA_TOKEN=RNR-xxxxxxx-xxxxxxx-xxx
   export WORKFLOWFIESTA_RUNNER_ID=abc123
   export WORKFLOWFIESTA_RUNNER_NAME=my-docker-runner
 
 Then run: workflowfiesta-runner run
 ```
 
-### 2. Set environment variables
+### 3. Set environment variables
 
 ```bash
 export WORKFLOWFIESTA_API_URL=https://your-instance.workflowfiesta.com
-export WORKFLOWFIESTA_TOKEN=wfr_xxxxxxxxxxxx
+export WORKFLOWFIESTA_TOKEN=RNR-xxxxxxx-xxxxxxx-xxx
 export WORKFLOWFIESTA_RUNNER_ID=abc123
 export WORKFLOWFIESTA_RUNNER_NAME=my-docker-runner
 ```
 
 Or place them in a `.env` file and `source` it.
 
-### 3. Start the runner
+### 4. Start the runner
 
 **Docker mode** (default on Linux/macOS outside Kubernetes):
 ```bash

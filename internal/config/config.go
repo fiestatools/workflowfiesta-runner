@@ -12,7 +12,7 @@ import (
 
 // DefaultAPIURL is the production WorkflowFiesta SaaS endpoint. Self-hosted
 // instances should set WORKFLOWFIESTA_API_URL or pass --api-url explicitly.
-const DefaultAPIURL = "https://app.workflowfiesta.com"
+const DefaultAPIURL = "https://api.workflowfiesta.com"
 
 type Config struct {
 	APIURL              string

@@ -19,7 +19,7 @@ workflowfiesta-runner run
 1. Loads config from environment variables and credentials file.
 2. Determines executor type: `CONTAINER_RUNTIME` → Kubernetes auto-detect (`KUBERNETES_SERVICE_HOST`) → Windows default (`local`) → `docker`.
 3. Creates a `runner.Runner` with a `cliSink` (ASCII output to stdout).
-4. Connects to the API WebSocket with automatic retry.
+4. Connects to the API via HTTP polling with automatic retry.
 5. Runs the job dispatch loop (see [api-client.md](./api-client.md) and [architecture.md](./architecture.md)).
 6. Shuts down cleanly on SIGINT / SIGTERM.
 
@@ -58,24 +58,23 @@ workflowfiesta-runner run-local [flags]
 
 ## `register`
 
-Register a new runner with WorkflowFiesta. Prints the runner ID and token to stdout.
+Register this machine as a self-hosted runner using a one-time registration code issued from the WorkflowFiesta web UI (Runners → "Set up a runner").
 
 ```
-workflowfiesta-runner register --api-url <url> --name <name> --org-id <org-id>
+workflowfiesta-runner register --code <registration-code> [--api-url <url>]
 ```
 
-**Flags (all required):**
+**Flags:**
 
-| Flag | Description |
-|---|---|
-| `--api-url` | Full URL of the WorkflowFiesta API, e.g. `https://app.example.com` |
-| `--name` | Display name for this runner |
-| `--org-id` | UUID of the organization to register under |
+| Flag | Required | Default | Description |
+|---|---|---|---|
+| `--code` | Yes | — | One-time registration code from the web UI (starts with `RNR-`). The runner name and organization are embedded in the code. |
+| `--api-url` | No | `https://app.workflowfiesta.com` | Full URL of the WorkflowFiesta API. Also read from `WORKFLOWFIESTA_API_URL`. |
 
 **Behavior:**
-- POSTs to `<api-url>/api/runner/register` with `{ name, org_id }`.
-- On success, prints the runner ID, token, and the `export` commands to paste into a shell.
-- Does NOT write credentials to disk; the user must set environment variables manually.
+- POSTs `{ "code": "<code>" }` to `<api-url>/api/runner/register`.
+- On success, prints the runner UID, name, token, and the `export` commands to paste into a shell.
+- Does NOT write credentials to disk; the user must set environment variables or save to `~/.workflowfiesta/credentials.env` manually.
 
 ---
 
@@ -95,7 +94,7 @@ workflowfiesta-runner register-local [--config <path>]
 
 **Behavior:**
 - Opens the 4-step Fyne wizard:
-  1. **Connect & Register**: API URL, Org ID, Runner Name → calls registration API.
+  1. **Connect & Register**: Registration code (and optional API URL override) → calls `/api/runner/register`.
   2. **Token**: displays runner ID and token; offers a "Copy Token" button. Token is also saved automatically to `credentials.env`.
   3. **Local Permissions**: allowed paths, approval mode, timeouts, network mode.
   4. **Done**: shows the start command.

@@ -439,7 +439,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	navArea := container.NewStack(navBg, container.NewPadded(navRow))
 
 	win.SetContent(container.NewBorder(dotsHeader, navArea, nil, nil,
-		container.NewPadded(bodyHolder),
+		container.NewVScroll(container.NewPadded(bodyHolder)),
 	))
 
 	setStep(0)

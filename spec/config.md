@@ -16,7 +16,7 @@ Configuration is loaded by `internal/config.Load()` at startup. Values are read 
 
 | Variable | Default | Description |
 |---|---|---|
-| `WORKFLOWFIESTA_API_URL` | `http://localhost:3001` | Base URL of the WorkflowFiesta API. Do not include a trailing slash. |
+| `WORKFLOWFIESTA_API_URL` | `https://app.workflowfiesta.com` | Base URL of the WorkflowFiesta API. Do not include a trailing slash. |
 | `WORKFLOWFIESTA_RUNNER_ID` | *(empty)* | UUID of this runner record in the database. Set automatically by `register`. |
 | `WORKFLOWFIESTA_RUNNER_NAME` | `unnamed-runner` | Display name shown in the web UI. |
 | `WORKFLOWFIESTA_LABELS` | *(empty)* | Comma-separated labels, e.g. `prod,linux,gpu`. Used for runner group membership. |

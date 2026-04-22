@@ -201,3 +201,29 @@ func TestWriteCredentials_HasExportPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestFrontendURLFrom(t *testing.T) {
+	tests := []struct {
+		name   string
+		apiURL string
+		want   string
+	}{
+		{"prod api domain", "https://api.workflowfiesta.com", "https://app.workflowfiesta.com"},
+		{"staging api domain", "https://staging.api.workflowfiesta.com", "https://staging.app.workflowfiesta.com"},
+		{"prod app domain unchanged", "https://app.workflowfiesta.com", "https://app.workflowfiesta.com"},
+		{"staging app domain unchanged", "https://staging.app.workflowfiesta.com", "https://staging.app.workflowfiesta.com"},
+		{"self-hosted unchanged", "https://my-instance.example.com", "https://my-instance.example.com"},
+		{"localhost backend to frontend", "http://localhost:5000", "http://localhost:3000"},
+		{"127.0.0.1 backend to frontend", "http://127.0.0.1:5000", "http://127.0.0.1:3000"},
+		{"localhost other port unchanged", "http://localhost:8080", "http://localhost:8080"},
+		{"trailing slash stripped", "https://api.workflowfiesta.com/", "https://app.workflowfiesta.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := localui.FrontendURLFrom(tt.apiURL)
+			if got != tt.want {
+				t.Errorf("FrontendURLFrom(%q) = %q, want %q", tt.apiURL, got, tt.want)
+			}
+		})
+	}
+}

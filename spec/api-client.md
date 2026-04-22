@@ -1,71 +1,87 @@
-# API Client — WebSocket Protocol
+# API Client — HTTP Polling Protocol
 
-The runner communicates with the WorkflowFiesta API exclusively over a single persistent WebSocket connection. The client lives in `internal/api/client.go`.
+The runner communicates with the WorkflowFiesta API over HTTP REST endpoints using a poll-based model. The client lives in `internal/api/client.go`.
 
 ---
 
 ## Connection
 
-**Endpoint:** `<WORKFLOWFIESTA_API_URL>/runner-ws`
-`http://` and `https://` are rewritten to `ws://` and `wss://` automatically.
+**Base URL:** `<WORKFLOWFIESTA_API_URL>` (default: `https://app.workflowfiesta.com`)
 
 **Authentication:**
-- HTTP header: `Authorization: Bearer <token>`
-- Query parameter: `?token=<token>` (fallback for environments that strip headers)
+- HTTP header: `Authorization: Bearer <token>` on every request.
+- Optional header: `X-Org-Id: <orgId>` (set after first heartbeat response).
 
-**Close codes:**
-- `4001` or `4003`: authentication failure. The runner calls `log.Fatalf` immediately — no reconnect.
-
----
-
-## Reconnection
-
-`ConnectWithRetry` retries indefinitely with linear back-off:
-
-```
-delay = min(attempt * 2, 30) seconds
-```
-
-- Attempt 1: 2 s
-- Attempt 2: 4 s
-- Attempt 5+: 30 s (cap)
-
-Reconnects are also triggered automatically by `Listen()` whenever `ReadMessage()` returns an error (including deadline exceeded from a missed Pong).
+**HTTP client timeout:** 30 seconds per request.
 
 ---
 
-## Ping / Pong Keep-Alive
+## Polling Loop
 
-The runner uses two keep-alive mechanisms simultaneously:
+The runner uses a simple poll loop (driven by `runner.Run()`):
 
-1. **Application heartbeat** — every 30 s, sends `{ "type": "heartbeat" }` as a JSON text frame. The server uses this to update the runner's `last_seen_at` timestamp and mark it online.
+1. **Heartbeat** — every 30 s, POST to `/api/runner/heartbeat`.
+2. **Job poll** — every 3 s, GET `/api/runner/jobs/next`.
+3. When a job is returned, the runner executes it and reports results via POST endpoints.
 
-2. **WebSocket PING frame** — every 30 s, sends a WebSocket control PING. The ws npm library on the server side auto-responds with a PONG. On PONG receipt, the read deadline is extended by 75 s.
-
-**Dead connection detection:** if no PONG arrives within 75 s of a PING, the read deadline fires and `ReadMessage()` returns an error. `Listen()` clears `c.conn` and calls `ConnectWithRetry`.
+There is no persistent connection (no WebSocket). All communication is stateless HTTP request/response.
 
 ---
 
-## Message Types
+## Heartbeat
 
-All messages are JSON text frames.
+**Endpoint:** `POST /api/runner/heartbeat`
 
-### Incoming (API → Runner)
+Sent every 30 seconds. Reports the runner's status, capabilities, and build info. The server uses this to update `last_seen_at` and mark the runner online.
 
-#### `job`
-
-Dispatches a job to the runner.
-
+**Request body:**
 ```json
 {
-  "type": "job",
+  "status": "idle",
+  "capabilities": ["docker", "git"],
+  "os": "linux",
+  "arch": "amd64",
+  "version": "v1.2.0"
+}
+```
+
+**Response body:**
+```json
+{
+  "ok": true,
+  "orgId": "org_abc123"
+}
+```
+
+The returned `orgId` is stored and sent as `X-Org-Id` on all subsequent requests.
+
+---
+
+## Job Polling
+
+**Endpoint:** `GET /api/runner/jobs/next`
+
+Called every 3 seconds to claim the next pending job.
+
+**Responses:**
+- `204 No Content` — no pending job.
+- `200 OK` — a job was claimed; body contains the job payload.
+- `401 Unauthorized` — token invalid; runner calls `log.Fatal` immediately.
+
+**Job payload:**
+```json
+{
   "jobId": "job_abc123",
   "dockerImage": "ubuntu:22.04",
   "script": "echo hello world",
   "envVars": {
     "MY_VAR": "value"
   },
-  "timeoutSeconds": 300
+  "timeoutSeconds": 300,
+  "toolName": "run_script",
+  "toolArgs": {},
+  "git_repo_url": "",
+  "git_ref": ""
 }
 ```
 
@@ -76,78 +92,140 @@ Dispatches a job to the runner.
 | `script` | string | Shell script to execute |
 | `envVars` | object | Environment variables to pass to the script |
 | `timeoutSeconds` | int | Job timeout; 0 defaults to 5 minutes |
+| `toolName` | string | Optional: tool that generated this job |
+| `toolArgs` | object | Optional: arguments passed to the tool |
+| `git_repo_url` | string | Optional: git repo to clone before execution |
+| `git_ref` | string | Optional: git ref to checkout |
 
-### Outgoing (Runner → API)
+---
 
-#### `heartbeat`
+## Job Lifecycle Endpoints
 
-Sent every 30 s to indicate the runner is alive.
+### Stream output
 
-```json
-{ "type": "heartbeat" }
-```
+**Endpoint:** `POST /api/runner/jobs/<jobId>/output`
 
-#### `job:claimed`
-
-Sent immediately after the runner dequeues a job, before execution begins. Prevents the server from re-dispatching.
-
-```json
-{ "type": "job:claimed", "jobId": "job_abc123" }
-```
-
-#### `job:output`
-
-Streams a chunk of stdout/stderr output. Sent for each chunk received from the executor's output channel.
+Sent for each chunk of stdout/stderr output during execution.
 
 ```json
-{ "type": "job:output", "jobId": "job_abc123", "chunk": "hello world\n" }
+{ "chunk": "hello world\n" }
 ```
 
-#### `job:complete`
+### Report completion
 
-Sent when the script finishes successfully (even if exit code != 0).
+**Endpoint:** `POST /api/runner/jobs/<jobId>/complete`
+
+Sent when the script finishes (even if exit code != 0).
 
 ```json
 {
-  "type": "job:complete",
-  "jobId": "job_abc123",
   "exitCode": 0,
   "output": "hello world\n"
 }
 ```
 
-#### `job:failed`
+### Report failure
 
-Sent when the executor itself fails (not a non-zero exit code, but an infrastructure error such as image pull failure or timeout).
+**Endpoint:** `POST /api/runner/jobs/<jobId>/fail`
 
-```json
-{ "type": "job:failed", "jobId": "job_abc123", "error": "timeout after 5m0s" }
-```
-
-#### `job:approval_pending`
-
-Sent by the local executor when a job requires human approval before execution. The API uses this to update the job's status in the database.
+Sent when the executor itself fails (infrastructure error, image pull failure, timeout — not a non-zero exit code).
 
 ```json
-{ "type": "job:approval_pending", "jobId": "job_abc123", "runnerName": "my-laptop" }
+{ "error": "timeout after 5m0s" }
 ```
 
-#### `job:approval_resolved`
+### Report worktree path
+
+**Endpoint:** `POST /api/runner/jobs/<jobId>/worktree`
+
+Sent by the local executor to report the git worktree path on disk.
+
+```json
+{ "worktree_path": "/home/user/.workflowfiesta/worktrees/abc123" }
+```
+
+### Report approval pending
+
+**Endpoint:** `POST /api/runner/jobs/<jobId>/approval-pending`
+
+Sent by the local executor when a job requires human approval before execution.
+
+```json
+{ "runnerName": "my-laptop" }
+```
+
+### Report approval resolved
+
+**Endpoint:** `POST /api/runner/jobs/<jobId>/approval-resolved`
 
 Sent after the local operator approves or denies a job.
 
 ```json
-{ "type": "job:approval_resolved", "jobId": "job_abc123", "approved": true }
+{ "approved": true }
+```
+
+---
+
+## Script Library Endpoints
+
+### List scripts
+
+**Endpoint:** `GET /api/runner/scripts`
+
+Returns metadata for all scripts in the org's library.
+
+### Get script
+
+**Endpoint:** `GET /api/runner/scripts/<name>`
+
+Returns `{ "content": "..." }` for a named script.
+
+### Push script
+
+**Endpoint:** `POST /api/runner/scripts`
+
+Upserts a script to the org's library.
+
+```json
+{
+  "name": "deploy.sh",
+  "content": "#!/bin/bash\n...",
+  "description": "Deploy to production",
+  "tags": ["deploy", "prod"]
+}
+```
+
+---
+
+## Registration
+
+**Endpoint:** `POST /api/runner/register`
+
+Used by the `register` CLI command. Accepts a one-time code and returns credentials.
+
+**Request:**
+```json
+{ "code": "RNR-xxxxxxx-xxxxxxx-xxx" }
+```
+
+**Response (201 Created):**
+```json
+{
+  "uid": "abc123",
+  "token": "wfr_xxxxxxxxxxxxxxxxxxxx",
+  "orgUid": "org_abc",
+  "name": "my-runner",
+  "environmentUid": "env_abc"
+}
 ```
 
 ---
 
 ## Thread Safety
 
-- `c.conn` is protected by `c.mu` mutex.
-- All `send()` calls acquire `c.mu`.
-- `Listen()` reads without the mutex (Gorilla WebSocket: one reader, one writer goroutine is safe).
-- On a write error, `send()` nils `c.conn` so `Listen()` detects the failure on the next `ReadMessage()` deadline expiry and reconnects.
+- `c.orgID` is protected by `c.mu` mutex.
+- All requests go through `c.do()` which acquires `c.mu` to read `orgID`.
+- The HTTP client is safe for concurrent use.
 
 ---
 
