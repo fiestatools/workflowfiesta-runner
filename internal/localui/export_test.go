@@ -41,6 +41,9 @@ var RegisterAPI = callRegisterAPI
 // WriteCredentials exposes writeCredentials for tests.
 var WriteCredentials = writeCredentials
 
+// FrontendURLFrom exposes frontendURLFrom for tests.
+var FrontendURLFrom = frontendURLFrom
+
 // SampleApprovalRequest returns a populated ApprovalRequest for use in tests.
 func SampleApprovalRequest(timeout time.Duration) ApprovalRequest {
 	return ApprovalRequest{

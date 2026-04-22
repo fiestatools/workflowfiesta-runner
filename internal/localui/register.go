@@ -140,19 +140,16 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 
 	apiURLEntry := widget.NewEntry()
 	apiURLEntry.SetText(defaultAPIURL)
-	apiURLEntry.SetPlaceHolder("https://app.workflowfiesta.com")
+	apiURLEntry.SetPlaceHolder("https://api.workflowfiesta.com")
 
 	codeEntry := widget.NewEntry()
 	codeEntry.SetPlaceHolder("RNR-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXX")
 	codeEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	// "Get a code →" hyperlink that opens the setup page on the configured instance.
-	// The setup page asks the user to name the runner before issuing a code, so
-	// the runner binary doesn't need to collect a name itself.
-	getCodeURL, _ := url.Parse(strings.TrimRight(defaultAPIURL, "/") + "/runners/setup")
+	getCodeURL, _ := url.Parse(frontendURLFrom(defaultAPIURL) + "/runners/setup")
 	getCodeLink := widget.NewHyperlink("Don't have a code? Get one →", getCodeURL)
 	apiURLEntry.OnChanged = func(v string) {
-		if u, err := url.Parse(strings.TrimRight(strings.TrimSpace(v), "/") + "/runners/setup"); err == nil {
+		if u, err := url.Parse(frontendURLFrom(strings.TrimSpace(v)) + "/runners/setup"); err == nil {
 			getCodeLink.SetURL(u)
 		}
 	}
@@ -618,7 +615,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 	navArea := container.NewStack(navBg, container.NewPadded(navRow))
 
 	win.SetContent(container.NewBorder(dotsHeader, navArea, nil, nil,
-		container.NewPadded(bodyHolder),
+		container.NewVScroll(container.NewPadded(bodyHolder)),
 	))
 
 	show(0)
@@ -812,4 +809,32 @@ func writeCredentials(credPath string, r *RegistrationResult) error {
 		r.APIURL, r.Token, r.RunnerUID, r.RunnerName,
 	)
 	return os.WriteFile(credPath, []byte(content), 0o600)
+}
+
+// frontendURLFrom maps an API URL to its frontend counterpart:
+//   api.workflowfiesta.com         → app.workflowfiesta.com
+//   staging.api.workflowfiesta.com → staging.app.workflowfiesta.com
+//   app.workflowfiesta.com         → app.workflowfiesta.com  (unchanged)
+//   localhost:5000                 → localhost:3000
+func frontendURLFrom(apiURL string) string {
+	s := strings.TrimRight(apiURL, "/")
+	parsed, err := url.Parse(s)
+	if err != nil {
+		return s
+	}
+	host := parsed.Hostname()
+	if strings.Contains(host, "api.") && !strings.Contains(host, "app.") {
+		newHost := strings.Replace(host, "api.", "app.", 1)
+		if parsed.Port() != "" {
+			parsed.Host = newHost + ":" + parsed.Port()
+		} else {
+			parsed.Host = newHost
+		}
+		return parsed.String()
+	}
+	if (host == "localhost" || host == "127.0.0.1") && parsed.Port() == "5000" {
+		parsed.Host = host + ":3000"
+		return parsed.String()
+	}
+	return s
 }
