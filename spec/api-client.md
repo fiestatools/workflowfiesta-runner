@@ -18,6 +18,10 @@ All request and response bodies are JSON.
 
 **Auth failure:** `GET /api/runner/jobs/next` returning 401 is treated as fatal (`log.Fatal`) — the runner exits so an operator re-registers rather than spinning. Other 4xx/5xx responses return errors and the loop continues.
 
+- `c.orgID` is protected by `c.mu` mutex.
+- All requests go through `c.do()` which acquires `c.mu` to read `orgID`.
+- The HTTP client is safe for concurrent use.
+
 ---
 
 ## Loops
@@ -145,13 +149,18 @@ For anyone coming to this code with the old WebSocket-era assumptions:
 - **No ping/pong.** Liveness is conveyed by the 30 s heartbeat POST; the backend considers a runner offline when its `lastSeen` is older than ~90 s.
 - **No reconnect logic.** Each request is independent; the 30 s `http.Client` timeout bounds stuck requests.
 
+
 ---
 
-## Thread Safety
+## What the runner does NOT do
 
-- `c.orgID` is protected by `c.mu` mutex.
-- All requests go through `c.do()` which acquires `c.mu` to read `orgID`.
-- The HTTP client is safe for concurrent use.
+For anyone coming to this code with the old WebSocket-era assumptions:
+
+- **No persistent socket.** No WebSocket, no Server-Sent Events, no long-polled connection.
+- **No Redis client.** The backend has a `runnerChannel(runnerId)` Redis topic, but the runner does not subscribe to it. Any push-to-runner mechanism built on that channel needs a bridge (see [dispatch-wakeup.md](./dispatch-wakeup.md)).
+- **No ping/pong.** Liveness is conveyed by the 30 s heartbeat POST; the backend considers a runner offline when its `lastSeen` is older than ~90 s.
+- **No reconnect logic.** Each request is independent; the 30 s `http.Client` timeout bounds stuck requests.
+
 
 ---
 
