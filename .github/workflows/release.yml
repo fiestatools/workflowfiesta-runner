@@ -246,10 +246,9 @@ jobs:
       - name: Download and setup CodeSignTool
         run: |
           curl -fsSL -o CodeSignTool.zip "https://www.ssl.com/download/codesigntool-for-linux-and-macos/"
-          unzip CodeSignTool.zip
+          mkdir -p CodeSignTool
+          unzip -o CodeSignTool.zip -d CodeSignTool
           rm CodeSignTool.zip
-          # Archive extracts to a versioned directory (e.g. CodeSignTool-v1.2.7/)
-          mv CodeSignTool-v* CodeSignTool
           chmod +x CodeSignTool/CodeSignTool.sh
 
       - name: Sign Windows binaries
@@ -303,6 +302,10 @@ jobs:
           CSC_LINK: ${{ secrets.mac_csc_link }}
           CSC_KEY_PASSWORD: ${{ secrets.mac_csc_key_password }}
         run: |
+          if [ -z "$CSC_LINK" ]; then
+            echo "::error::mac_csc_link secret is not set — skipping macOS signing"
+            exit 1
+          fi
           echo "$CSC_LINK" | base64 --decode > cert.p12
           KEYCHAIN="build.keychain"
           KEYCHAIN_PASS="actions"
