@@ -257,6 +257,7 @@ jobs:
           WINDOWS_SIGN_USER_PASSWORD: ${{ secrets.WINDOWS_SIGN_USER_PASSWORD }}
           WINDOWS_SIGN_CREDENTIAL_ID: ${{ secrets.WINDOWS_SIGN_CREDENTIAL_ID }}
           WINDOWS_SIGN_USER_TOTP: ${{ secrets.WINDOWS_SIGN_USER_TOTP }}
+          CODE_SIGN_TOOL_PATH: "./CodeSignTool"
         run: |
           mkdir -p signed
           for exe in dist/*.exe; do
