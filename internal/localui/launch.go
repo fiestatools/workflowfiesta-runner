@@ -132,7 +132,6 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	saveBtn := newButton("Save & Start", nil)
 	saveBtn.Importance = widget.HighImportance
 	saveBtn.Hide()
-	nextBtn.Hide() // hidden until registration succeeds
 
 	navRow := container.NewHBox(
 		container.NewWithoutLayout(stepCountLabel),
@@ -223,7 +222,8 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			fyne.Do(func() {
 				setRegStatus("Registered! Token saved automatically.", colorSuccess)
 				nextBtn.Importance = widget.HighImportance
-				nextBtn.Show()
+				// Reveal Next (setStep is declared below; keep nav in sync with regResult)
+				nextBtn.Hidden = false
 				nextBtn.Refresh()
 			})
 		}()
@@ -346,7 +346,9 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		bodyHolder.Objects = []fyne.CanvasObject{steps[n]}
 		bodyHolder.Refresh()
 		backBtn.Hidden = (n == 0 || n == 3)
-		nextBtn.Hidden = (n != 0 && n != 1)
+		// Step 1 (n==0): Next only after Connect & Register succeeds (regResult set).
+		// Step 2 (n==1): Next always available to reach timeouts/paths step.
+		nextBtn.Hidden = (n != 1) && (n != 0 || regResult == nil)
 		saveBtn.Hidden = (n != 2)
 		backBtn.Refresh()
 		nextBtn.Refresh()
@@ -354,7 +356,12 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	}
 
 	backBtn.OnTapped = func() { setStep(currentStep - 1) }
-	nextBtn.OnTapped = func() { setStep(currentStep + 1) }
+	nextBtn.OnTapped = func() {
+		if currentStep == 0 && regResult == nil {
+			return
+		}
+		setStep(currentStep + 1)
+	}
 
 	saveBtn.OnTapped = func() {
 		if regResult == nil {
