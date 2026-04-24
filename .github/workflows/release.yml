@@ -339,16 +339,16 @@ jobs:
 
       - name: Prep notarization API key
         env:
-          APPLE_API_KEY: ${{ secrets.api_key }}
-          APPLE_API_KEY_ID: ${{ secrets.api_key_id }}
+          APPLE_API_KEY: ${{ secrets.apple_api_key }}
+          APPLE_API_KEY_ID: ${{ secrets.apple_api_key_id }}
         run: |
           mkdir -p ~/private_keys/
           echo "$APPLE_API_KEY" > ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
 
       - name: Notarize binaries
         env:
-          APPLE_API_KEY_ID: ${{ secrets.api_key_id }}
-          APPLE_API_KEY_ISSUER: ${{ secrets.api_key_issuer_id }}
+          APPLE_API_KEY_ID: ${{ secrets.apple_api_key_id }}
+          APPLE_API_KEY_ISSUER: ${{ secrets.apple_api_key_issuer_id }}
         run: |
           for bin in dist/workflowfiesta-runner-darwin-*; do
             [ -f "$bin" ] || continue
