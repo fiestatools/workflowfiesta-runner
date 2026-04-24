@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -96,6 +97,9 @@ type StatusWindow struct {
 	// Log (read-only Entry for text selection support)
 	logEntry  *widget.Entry
 	logScroll *container.Scroll
+	// suppressLogAutoScroll is true when the user has scrolled away from the bottom
+	// (do not jump the view on new output until they scroll back to the end).
+	suppressLogAutoScroll bool
 
 	// State tracking
 	state       runnerState
@@ -360,6 +364,8 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	clearBtn := newButton("Clear", func() {
 		fyne.Do(func() {
 			sw.logEntry.SetText("")
+			sw.suppressLogAutoScroll = false
+			sw.scrollOutputToBottom()
 		})
 	})
 	clearBtn.Importance = widget.LowImportance
@@ -376,12 +382,18 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 
 	// Use a multi-line Entry so users can select and copy output text.
 	// Wrapping is off so long lines stay on one line for easier selection.
+	// ScrollNone: let the outer logScroll be the only scroller. Otherwise the Entry
+	// keeps an inner scroll and the outer "bottom" sits a few pixels above the last line.
 	sw.logEntry = widget.NewMultiLineEntry()
 	sw.logEntry.Wrapping = fyne.TextWrapOff
+	sw.logEntry.Scroll = fyne.ScrollNone
 	sw.logEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	sw.logScroll = container.NewScroll(sw.logEntry)
+	sw.logScroll = container.NewVScroll(sw.logEntry)
 	sw.logScroll.SetMinSize(fyne.NewSize(0, 160))
+	sw.logScroll.OnScrolled = func(off fyne.Position) {
+		sw.suppressLogAutoScroll = !logScrollPinnedToBottom(sw.logScroll, off)
+	}
 
 	termBodyBg := canvas.NewRectangle(colorTermBg)
 	termBodyBg.StrokeColor = colorBorder
@@ -638,6 +650,69 @@ func (sw *StatusWindow) rebuildRecentJobs() {
 
 const maxLogBytes = 50 * 1024 // 50 KB cap — trim oldest content when exceeded
 
+// logScrollContentHeight is the effective scrollable height of the log (MinSize vs laid-out Size).
+func logScrollContentHeight(scroll *container.Scroll) float32 {
+	if scroll == nil || scroll.Content == nil {
+		return 0
+	}
+	h := scroll.Content.MinSize().Height
+	if sh := scroll.Content.Size().Height; sh > h {
+		h = sh
+	}
+	return h
+}
+
+// logScrollMaxY is the largest vertical offset that shows the end of the log content.
+func logScrollMaxY(scroll *container.Scroll) float32 {
+	if scroll == nil {
+		return 0
+	}
+	contentH := logScrollContentHeight(scroll)
+	viewH := scroll.Size().Height
+	d := contentH - viewH
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// logScrollPinnedToBottom reports whether the log scroll offset is at (or near) the end.
+func logScrollPinnedToBottom(scroll *container.Scroll, offset fyne.Position) bool {
+	maxY := logScrollMaxY(scroll)
+	if maxY <= 1 {
+		return true
+	}
+	slop := float32(12)
+	if w, ok := scroll.Content.(fyne.Widget); ok {
+		slop = theme.SizeForWidget(theme.SizeNameText, w) + theme.SizeForWidget(theme.SizeNameLineSpacing, w)
+	}
+	return offset.Y >= maxY-slop
+}
+
+func scrollLogToMaxY(scroll *container.Scroll) {
+	if scroll == nil {
+		return
+	}
+	y := logScrollMaxY(scroll)
+	scroll.ScrollToOffset(fyne.NewPos(scroll.Offset.X, y))
+}
+
+// scrollOutputToBottom moves the log viewport to the latest lines (after layout refreshes).
+func (sw *StatusWindow) scrollOutputToBottom() {
+	if sw.logScroll == nil || sw.logEntry == nil {
+		return
+	}
+	sw.logEntry.Refresh()
+	sw.logScroll.Refresh()
+	scrollLogToMaxY(sw.logScroll)
+	if sw.win != nil {
+		if c := sw.win.Canvas(); c != nil {
+			c.Refresh(sw.logScroll)
+		}
+	}
+	scrollLogToMaxY(sw.logScroll)
+}
+
 func (sw *StatusWindow) appendToLog(chunk string) {
 	fyne.Do(func() {
 		current := sw.logEntry.Text
@@ -652,7 +727,12 @@ func (sw *StatusWindow) appendToLog(chunk string) {
 			}
 		}
 		sw.logEntry.SetText(combined)
-		sw.logScroll.ScrollToBottom()
+		if !sw.suppressLogAutoScroll {
+			sw.scrollOutputToBottom()
+		} else {
+			sw.logEntry.Refresh()
+			sw.logScroll.Refresh()
+		}
 	})
 }
 
