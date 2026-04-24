@@ -89,6 +89,9 @@ type StatusWindow struct {
 
 	// CTA banner
 	ctaBanner *fyne.Container
+	stopAgentBtn     *cursorButton
+	stopAgentHandler func(string) error
+	activeJobID      string
 
 	// Recent jobs
 	recentBox *fyne.Container
@@ -430,7 +433,28 @@ func (sw *StatusWindow) buildCTABanner() fyne.CanvasObject {
 	})
 	openBtn.Importance = widget.HighImportance
 
-	btnRow := container.NewHBox(openBtn)
+	sw.stopAgentBtn = newButton("Stop Agent", func() {
+		jobID := sw.activeJobID
+		h := sw.stopAgentHandler
+		if jobID == "" || h == nil {
+			return
+		}
+		go func(j string, doStop func(string) error) {
+			err := doStop(j)
+			fyne.Do(func() {
+				if err != nil {
+					sw.appendToLog(fmt.Sprintf("[stop agent] %v\n", err))
+					dialog.ShowError(fmt.Errorf("stop agent: %w", err), sw.win)
+				} else {
+					sw.appendToLog("[stop agent] cancel requested — notifying platform\n")
+				}
+			})
+		}(jobID, h)
+	})
+	sw.stopAgentBtn.Importance = widget.LowImportance
+	sw.stopAgentBtn.Disable()
+
+	btnRow := container.NewHBox(openBtn, sw.stopAgentBtn)
 
 	inner := container.NewVBox(
 		container.NewHBox(icon, container.NewPadded(textCol)),
@@ -475,6 +499,15 @@ func (sw *StatusWindow) SetOnOpenSettings(fn func()) {
 	sw.onOpenSettings = fn
 }
 
+// SetStopAgentHandler registers the callback used by "Stop Agent" (POST /api/runner/cancel).
+// Pass nil to leave the button permanently disabled.
+func (sw *StatusWindow) SetStopAgentHandler(fn func(jobID string) error) {
+	fyne.Do(func() {
+		sw.stopAgentHandler = fn
+		sw.refreshStopAgentButton()
+	})
+}
+
 // SetConnected updates the connection indicator.
 func (sw *StatusWindow) SetConnected(connected bool) {
 	fyne.Do(func() {
@@ -485,9 +518,11 @@ func (sw *StatusWindow) SetConnected(connected bool) {
 			sw.ctaBanner.Show()
 		} else {
 			sw.state = stateDisconnected
+			sw.activeJobID = ""
 			sw.hostLabel.Text = "connecting..."
 			sw.hostLabel.Color = colorLabel
 			sw.ctaBanner.Hide()
+			sw.refreshStopAgentButton()
 		}
 		sw.hostLabel.Refresh()
 		sw.ctaBanner.Refresh()
@@ -501,7 +536,9 @@ func (sw *StatusWindow) SetIdle() {
 	sw.stopElapsed = func() {}
 	fyne.Do(func() {
 		sw.state = stateIdle
+		sw.activeJobID = ""
 		sw.jobCardOuter.Hide()
+		sw.refreshStopAgentButton()
 		sw.refreshBadge()
 	})
 }
@@ -524,6 +561,8 @@ func (sw *StatusWindow) SetJobRunning(jobID, image, scriptBlurb string) {
 		sw.statToday.Text = fmt.Sprintf("%d", sw.jobsToday)
 		sw.statToday.Refresh()
 		sw.jobCardOuter.Show()
+		sw.activeJobID = jobID
+		sw.refreshStopAgentButton()
 		sw.refreshBadge()
 	})
 
@@ -588,6 +627,8 @@ func (sw *StatusWindow) SetJobComplete(jobID, image string, exitCode int) {
 	}
 
 	fyne.Do(func() {
+		sw.activeJobID = ""
+		sw.refreshStopAgentButton()
 		sw.statSuccess.Text = fmt.Sprintf("%d", sw.jobsSuccess)
 		sw.statSuccess.Refresh()
 		sw.statFailed.Text = fmt.Sprintf("%d", sw.jobsFailed)
@@ -603,6 +644,18 @@ func (sw *StatusWindow) AppendLog(chunk string) {
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────
+
+func (sw *StatusWindow) refreshStopAgentButton() {
+	if sw.stopAgentBtn == nil {
+		return
+	}
+	if sw.stopAgentHandler != nil && sw.state == stateRunning && sw.activeJobID != "" {
+		sw.stopAgentBtn.Enable()
+	} else {
+		sw.stopAgentBtn.Disable()
+	}
+	sw.stopAgentBtn.Refresh()
+}
 
 func (sw *StatusWindow) refreshBadge() {
 	switch sw.state {

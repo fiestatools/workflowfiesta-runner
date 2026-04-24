@@ -303,7 +303,9 @@ var runLocalCmd = &cobra.Command{
 		// GUI mode: open status window + system tray.
 		// The runner runs in a goroutine; Fyne event loop on main thread.
 		// macOS requires the GUI event loop on the main OS thread.
+		r := runner.New(cfg)
 		sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
+		sw.SetStopAgentHandler(r.StopAgentJob)
 		// Wire up the settings gear button on the status window.
 		sw.SetOnOpenSettings(func() {
 			localui.OpenSettingsWindow(localCfg, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
@@ -315,7 +317,6 @@ var runLocalCmd = &cobra.Command{
 		// because the Fyne event loop hasn't started yet.
 		sw.Show()
 
-		r := runner.New(cfg)
 		go func() {
 			if err := r.WithSink(sw).Run(ctx); err != nil {
 				log.Errorf("Runner stopped: %v", err)
@@ -412,7 +413,9 @@ func main() {
 		localui.RunAutoLaunch(localconfig.DefaultPath(), func(cfg *config.Config) {
 			ctx, cancel := context.WithCancel(context.Background())
 
+			r := runner.New(cfg)
 			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
+			sw.SetStopAgentHandler(r.StopAgentJob)
 			localCfg2 := cfg.LocalConfig
 			// Wire up the settings gear button on the status window.
 			sw.SetOnOpenSettings(func() {
@@ -432,7 +435,7 @@ func main() {
 			}()
 
 			go func() {
-				if err := runner.New(cfg).WithSink(sw).Run(ctx); err != nil {
+				if err := r.WithSink(sw).Run(ctx); err != nil {
 					log.Errorf("Runner stopped: %v", err)
 				}
 				localui.QuitApp()
