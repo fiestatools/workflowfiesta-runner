@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -58,6 +59,15 @@ type jobRecord struct {
 	timestamp time.Time
 }
 
+type activeJobCard struct {
+	id          string
+	image       string
+	startedAt   time.Time
+	outer       *fyne.Container
+	elapsedText *canvas.Text
+	stopElapsed func()
+}
+
 // ── StatusWindow ──────────────────────────────────────────────────────────────
 
 // StatusWindow is a small always-visible window showing runner status and logs.
@@ -78,14 +88,9 @@ type StatusWindow struct {
 	statFailed  *canvas.Text
 	statUptime  *canvas.Text
 
-	// Active job card (shown only when running)
-	jobCardOuter   *fyne.Container
-	jobCardBg      *canvas.Rectangle
-	jobCardBorder  *canvas.Rectangle
-	jobIDLabel     *canvas.Text
-	jobElapsed     *canvas.Text
-	jobImageLabel  *canvas.Text
-	jobScriptLabel *widget.Label
+	// Active jobs section (shown only when at least one job is running)
+	jobCardOuter *fyne.Container
+	activeJobsBox *fyne.Container
 
 	// CTA banner
 	ctaBanner *fyne.Container
@@ -107,8 +112,8 @@ type StatusWindow struct {
 	jobsSuccess int
 	jobsFailed  int
 	startTime   time.Time
-	jobStarted  time.Time
-	stopElapsed     func()
+	activeMu    sync.Mutex
+	activeJobs  map[string]*activeJobCard
 
 	// onOpenSettings is called when the user clicks the settings gear button.
 	onOpenSettings func()
@@ -151,12 +156,12 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	})
 
 	sw := &StatusWindow{
-		win:         win,
-		runnerName:  runnerName,
-		apiURL:      apiURL,
-		webURL:      deriveWebURL(apiURL),
-		startTime:   time.Now(),
-		stopElapsed: func() {},
+		win:        win,
+		runnerName: runnerName,
+		apiURL:     apiURL,
+		webURL:     deriveWebURL(apiURL),
+		startTime:  time.Now(),
+		activeJobs: make(map[string]*activeJobCard),
 	}
 
 	content := container.NewVBox(
@@ -282,55 +287,22 @@ func (sw *StatusWindow) buildStatsStrip() fyne.CanvasObject {
 }
 
 func (sw *StatusWindow) buildJobCard() fyne.CanvasObject {
-	// Title + job ID row
-	cardTitle := canvas.NewText("ACTIVE JOB", colorAmber)
-	cardTitle.TextSize = 10
-	cardTitle.TextStyle = fyne.TextStyle{Bold: true}
+	sectionLabel := canvas.NewText("ACTIVE JOBS", colorLabel)
+	sectionLabel.TextSize = 10
+	sectionLabel.TextStyle = fyne.TextStyle{Bold: true}
 
-	sw.jobIDLabel = canvas.NewText("", colorMuted)
-	sw.jobIDLabel.TextSize = 11
+	sw.activeJobsBox = container.NewVBox()
 
-	sw.jobElapsed = canvas.NewText("00:00", colorAmber)
-	sw.jobElapsed.TextSize = 11
-	sw.jobElapsed.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
+	bg := canvas.NewRectangle(colorSurface)
+	bg.StrokeColor = colorBorder
+	bg.StrokeWidth = 1
 
-	titleRow := container.NewHBox(
-		container.NewWithoutLayout(cardTitle),
-		container.NewPadded(container.NewWithoutLayout(sw.jobIDLabel)),
-		layout.NewSpacer(),
-		container.NewWithoutLayout(sw.jobElapsed),
+	inner := container.NewVBox(
+		container.NewPadded(container.NewWithoutLayout(sectionLabel)),
+		sw.activeJobsBox,
 	)
-
-	// Image pill
-	sw.jobImageLabel = canvas.NewText("", colorMuted)
-	sw.jobImageLabel.TextSize = 11
-
-	imgPillBg := canvas.NewRectangle(colorPrimaryDim)
-	imgPillBg.CornerRadius = 8
-	imgPillBg.StrokeColor = color.NRGBA{R: 59, G: 130, B: 246, A: 60}
-	imgPillBg.StrokeWidth = 1
-	imgPill := container.NewStack(imgPillBg, container.NewPadded(container.NewWithoutLayout(sw.jobImageLabel)))
-
-	// Script preview
-	sw.jobScriptLabel = widget.NewLabel("")
-	sw.jobScriptLabel.TextStyle = fyne.TextStyle{Monospace: true}
-	sw.jobScriptLabel.Wrapping = fyne.TextTruncate
-
-	scriptBg := canvas.NewRectangle(color.NRGBA{R: 0, G: 0, B: 0, A: 50})
-	scriptBg.CornerRadius = 3
-	scriptBlock := container.NewStack(scriptBg, container.NewPadded(sw.jobScriptLabel))
-
-	innerContent := container.NewVBox(titleRow, imgPill, scriptBlock)
-
-	sw.jobCardBg = canvas.NewRectangle(colorAmberDim)
-	sw.jobCardBg.CornerRadius = 6
-	sw.jobCardBg.StrokeColor = color.NRGBA{R: 245, G: 158, B: 11, A: 60}
-	sw.jobCardBg.StrokeWidth = 1
-
-	cardInner := container.NewStack(sw.jobCardBg, container.NewPadded(innerContent))
-	sw.jobCardOuter = container.NewVBox(container.NewPadded(cardInner))
+	sw.jobCardOuter = container.NewStack(bg, inner)
 	sw.jobCardOuter.Hide()
-
 	return sw.jobCardOuter
 }
 
@@ -479,7 +451,11 @@ func (sw *StatusWindow) SetOnOpenSettings(fn func()) {
 func (sw *StatusWindow) SetConnected(connected bool) {
 	fyne.Do(func() {
 		if connected {
-			sw.state = stateIdle
+			if sw.activeJobCount() > 0 {
+				sw.state = stateRunning
+			} else {
+				sw.state = stateIdle
+			}
 			sw.hostLabel.Text = sw.apiURL
 			sw.hostLabel.Color = colorMuted
 			sw.ctaBanner.Show()
@@ -497,62 +473,34 @@ func (sw *StatusWindow) SetConnected(connected bool) {
 
 // SetIdle clears the current job info and returns the badge to green.
 func (sw *StatusWindow) SetIdle() {
-	sw.stopElapsed()
-	sw.stopElapsed = func() {}
 	fyne.Do(func() {
-		sw.state = stateIdle
-		sw.jobCardOuter.Hide()
+		if sw.activeJobCount() == 0 {
+			sw.state = stateIdle
+			sw.jobCardOuter.Hide()
+		} else {
+			sw.state = stateRunning
+			sw.jobCardOuter.Show()
+		}
 		sw.refreshBadge()
 	})
 }
 
 // SetJobRunning updates the display with the running job ID, image, and script blurb.
 func (sw *StatusWindow) SetJobRunning(jobID, image, scriptBlurb string) {
-	sw.stopElapsed()
-
-	sw.jobsToday++
+	sw.activeMu.Lock()
+	if _, exists := sw.activeJobs[jobID]; !exists {
+		sw.jobsToday++
+		sw.activeJobs[jobID] = makeActiveJobCard(jobID, image, scriptBlurb)
+	}
+	sw.activeMu.Unlock()
 	fyne.Do(func() {
+		sw.refreshActiveJobsUI()
 		sw.state = stateRunning
-		sw.jobStarted = time.Now()
-		sw.jobIDLabel.Text = jobID
-		sw.jobIDLabel.Refresh()
-		sw.jobImageLabel.Text = "🐳 " + image
-		sw.jobImageLabel.Refresh()
-		sw.jobScriptLabel.SetText(scriptBlurb)
-		sw.jobElapsed.Text = "00:00"
-		sw.jobElapsed.Refresh()
 		sw.statToday.Text = fmt.Sprintf("%d", sw.jobsToday)
 		sw.statToday.Refresh()
 		sw.jobCardOuter.Show()
 		sw.refreshBadge()
 	})
-
-	// Start elapsed counter
-	stopped := make(chan struct{})
-	sw.stopElapsed = func() {
-		select {
-		case <-stopped:
-		default:
-			close(stopped)
-		}
-	}
-	go func() {
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-stopped:
-				return
-			case <-t.C:
-				elapsed := time.Since(sw.jobStarted)
-				txt := fmt.Sprintf("%02d:%02d", int(elapsed.Minutes()), int(elapsed.Seconds())%60)
-				fyne.Do(func() {
-					sw.jobElapsed.Text = txt
-					sw.jobElapsed.Refresh()
-				})
-			}
-		}
-	}()
 
 	line := strings.Repeat("─", 50)
 	sw.appendToLog(fmt.Sprintf("┌%s┐\n│  ► JOB %-42s│\n├%s┤\n│  ID    : %-40s│\n│  Image : %-40s│\n└%s┘\n",
@@ -566,10 +514,18 @@ func (sw *StatusWindow) SetJobRunning(jobID, image, scriptBlurb string) {
 
 // SetJobComplete records a completed job in history (call before SetIdle).
 func (sw *StatusWindow) SetJobComplete(jobID, image string, exitCode int) {
-	sw.stopElapsed()
-	sw.stopElapsed = func() {}
+	sw.activeMu.Lock()
+	card := sw.activeJobs[jobID]
+	if card != nil {
+		card.stopElapsed()
+		delete(sw.activeJobs, jobID)
+	}
+	sw.activeMu.Unlock()
 
-	dur := time.Since(sw.jobStarted)
+	dur := time.Duration(0)
+	if card != nil {
+		dur = time.Since(card.startedAt)
+	}
 	rec := jobRecord{
 		id:        jobID,
 		image:     image,
@@ -588,11 +544,20 @@ func (sw *StatusWindow) SetJobComplete(jobID, image string, exitCode int) {
 	}
 
 	fyne.Do(func() {
+		sw.refreshActiveJobsUI()
+		if sw.activeJobCount() == 0 {
+			sw.state = stateIdle
+			sw.jobCardOuter.Hide()
+		} else {
+			sw.state = stateRunning
+			sw.jobCardOuter.Show()
+		}
 		sw.statSuccess.Text = fmt.Sprintf("%d", sw.jobsSuccess)
 		sw.statSuccess.Refresh()
 		sw.statFailed.Text = fmt.Sprintf("%d", sw.jobsFailed)
 		sw.statFailed.Refresh()
 		sw.rebuildRecentJobs()
+		sw.refreshBadge()
 	})
 }
 
@@ -654,6 +619,114 @@ func (sw *StatusWindow) appendToLog(chunk string) {
 		sw.logEntry.SetText(combined)
 		sw.logScroll.ScrollToBottom()
 	})
+}
+
+func makeActiveJobCard(jobID, image, scriptBlurb string) *activeJobCard {
+	cardTitle := canvas.NewText("RUNNING", colorAmber)
+	cardTitle.TextSize = 10
+	cardTitle.TextStyle = fyne.TextStyle{Bold: true}
+
+	jobIDLabel := canvas.NewText(jobID, colorMuted)
+	jobIDLabel.TextSize = 11
+
+	elapsed := canvas.NewText("00:00", colorAmber)
+	elapsed.TextSize = 11
+	elapsed.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
+
+	titleRow := container.NewHBox(
+		container.NewWithoutLayout(cardTitle),
+		container.NewPadded(container.NewWithoutLayout(jobIDLabel)),
+		layout.NewSpacer(),
+		container.NewWithoutLayout(elapsed),
+	)
+
+	imageLabel := canvas.NewText("🐳 "+image, colorMuted)
+	imageLabel.TextSize = 11
+	imgPillBg := canvas.NewRectangle(colorPrimaryDim)
+	imgPillBg.CornerRadius = 8
+	imgPillBg.StrokeColor = color.NRGBA{R: 59, G: 130, B: 246, A: 60}
+	imgPillBg.StrokeWidth = 1
+	imgPill := container.NewStack(imgPillBg, container.NewPadded(container.NewWithoutLayout(imageLabel)))
+
+	scriptLabel := widget.NewLabel(scriptBlurb)
+	scriptLabel.TextStyle = fyne.TextStyle{Monospace: true}
+	scriptLabel.Wrapping = fyne.TextTruncate
+	scriptBg := canvas.NewRectangle(color.NRGBA{R: 0, G: 0, B: 0, A: 50})
+	scriptBg.CornerRadius = 3
+	scriptBlock := container.NewStack(scriptBg, container.NewPadded(scriptLabel))
+
+	cardBg := canvas.NewRectangle(colorAmberDim)
+	cardBg.CornerRadius = 6
+	cardBg.StrokeColor = color.NRGBA{R: 245, G: 158, B: 11, A: 60}
+	cardBg.StrokeWidth = 1
+
+	inner := container.NewVBox(titleRow, imgPill, scriptBlock)
+	outer := container.NewVBox(container.NewPadded(container.NewStack(cardBg, container.NewPadded(inner))))
+
+	startedAt := time.Now()
+	stopped := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopped:
+				return
+			case <-t.C:
+				txt := fmt.Sprintf("%02d:%02d", int(time.Since(startedAt).Minutes()), int(time.Since(startedAt).Seconds())%60)
+				fyne.Do(func() {
+					elapsed.Text = txt
+					elapsed.Refresh()
+				})
+			}
+		}
+	}()
+
+	stopFn := func() {
+		select {
+		case <-stopped:
+		default:
+			close(stopped)
+		}
+	}
+
+	return &activeJobCard{
+		id:          jobID,
+		image:       image,
+		startedAt:   startedAt,
+		outer:       outer,
+		elapsedText: elapsed,
+		stopElapsed: stopFn,
+	}
+}
+
+func (sw *StatusWindow) refreshActiveJobsUI() {
+	var cards []*activeJobCard
+	sw.activeMu.Lock()
+	for _, c := range sw.activeJobs {
+		cards = append(cards, c)
+	}
+	sw.activeMu.Unlock()
+	// Stable order by start time so cards don't jump.
+	for i := 0; i < len(cards)-1; i++ {
+		for j := i + 1; j < len(cards); j++ {
+			if cards[i].startedAt.After(cards[j].startedAt) {
+				cards[i], cards[j] = cards[j], cards[i]
+			}
+		}
+	}
+	rows := make([]fyne.CanvasObject, 0, len(cards))
+	for _, c := range cards {
+		rows = append(rows, c.outer)
+	}
+	sw.activeJobsBox.Objects = rows
+	sw.activeJobsBox.Refresh()
+}
+
+func (sw *StatusWindow) activeJobCount() int {
+	sw.activeMu.Lock()
+	defer sw.activeMu.Unlock()
+	return len(sw.activeJobs)
 }
 
 func (sw *StatusWindow) uptimeTicker() {
