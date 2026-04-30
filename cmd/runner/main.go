@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -181,7 +182,7 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 		}
 
 		if len(errs) > 0 {
-			return fmt.Errorf(strings.Join(errs, "; "))
+			return errors.New(strings.Join(errs, "; "))
 		}
 		if onStop != nil {
 			onStop()
