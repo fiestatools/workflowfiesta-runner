@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -165,17 +166,48 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 				errs = append(errs, "remove custom config: "+err.Error())
 			}
 		}
-
-		if onStop != nil {
-			onStop()
+		// Relaunch the app so user lands back in setup/registration flow immediately.
+		exePath, err := os.Executable()
+		if err != nil {
+			errs = append(errs, "resolve executable: "+err.Error())
+		} else {
+			cmd := exec.Command(exePath)
+			// Strip runner credential env so startup detects "not registered".
+			cmd.Env = filteredEnvForRelaunch(os.Environ())
+			if err := cmd.Start(); err != nil {
+				errs = append(errs, "relaunch app: "+err.Error())
+			}
 		}
-		localui.QuitApp()
 
 		if len(errs) > 0 {
 			return fmt.Errorf(strings.Join(errs, "; "))
 		}
+		if onStop != nil {
+			onStop()
+		}
+		localui.QuitApp()
 		return nil
 	}
+}
+
+func filteredEnvForRelaunch(env []string) []string {
+	drop := map[string]struct{}{
+		"WORKFLOWFIESTA_TOKEN":       {},
+		"WORKFLOWFIESTA_RUNNER_ID":   {},
+		"WORKFLOWFIESTA_RUNNER_NAME": {},
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			key = kv[:i]
+		}
+		if _, blocked := drop[key]; blocked {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 var runCmd = &cobra.Command{
