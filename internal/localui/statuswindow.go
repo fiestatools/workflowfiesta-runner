@@ -499,7 +499,7 @@ func (sw *StatusWindow) SetOnOpenSettings(fn func()) {
 	sw.onOpenSettings = fn
 }
 
-// SetStopAgentHandler registers the callback used by "Stop Agent" (POST /api/runner/cancel).
+// SetStopAgentHandler registers the callback used by "Stop Agent" (POST /api/runner/jobs/:id/cancel).
 // Pass nil to leave the button permanently disabled.
 func (sw *StatusWindow) SetStopAgentHandler(fn func(jobID string) error) {
 	fyne.Do(func() {

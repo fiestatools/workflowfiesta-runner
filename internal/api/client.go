@@ -177,10 +177,10 @@ func (c *Client) ReportJobFailed(jobID, errMsg string) error {
 	return c.post("/api/runner/jobs/"+jobID+"/fail", map[string]string{"error": errMsg})
 }
 
-// RequestAgentCancel asks the platform to stop the current agent run for this runner
-// without tearing down the runner process (POST /api/runner/cancel).
+// RequestAgentCancel asks the platform to stop a running job for this runner
+// without tearing down the runner process (POST /api/runner/jobs/:id/cancel).
 func (c *Client) RequestAgentCancel(jobID string) error {
-	return c.post("/api/runner/cancel", map[string]string{"jobId": jobID})
+	return c.post("/api/runner/jobs/"+jobID+"/cancel", nil)
 }
 
 // ReportWorktreePath reports the local worktree path for a job to the server.
