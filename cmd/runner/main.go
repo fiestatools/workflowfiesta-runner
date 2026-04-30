@@ -151,7 +151,8 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 				client.SetOrgID(cfg.LocalConfig.OrgID)
 			}
 			if err := client.DeleteRunner(cfg.RunnerID); err != nil {
-				errs = append(errs, "delete runner on server: "+err.Error())
+				// Best-effort only: local reset/relaunch must continue even if server reset fails.
+				log.Warnf("reset runner: delete on server failed: %v", err)
 			}
 		}
 
