@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	wfapi "workflowfiesta-runner/internal/api"
 	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/localui"
@@ -135,6 +137,45 @@ func truncateCLI(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func() error {
+	return func() error {
+		var errs []string
+
+		// Best-effort: unregister the runner on the server first.
+		if cfg != nil && cfg.APIURL != "" && cfg.Token != "" && cfg.RunnerID != "" {
+			client := wfapi.New(cfg.APIURL, cfg.Token)
+			if cfg.LocalConfig != nil && cfg.LocalConfig.OrgID != "" {
+				client.SetOrgID(cfg.LocalConfig.OrgID)
+			}
+			if err := client.DeleteRunner(cfg.RunnerID); err != nil {
+				errs = append(errs, "delete runner on server: "+err.Error())
+			}
+		}
+
+		// Clear local persisted state.
+		homeStateDir := filepath.Dir(config.CredentialsFilePath()) // ~/.workflowfiesta
+		if err := os.RemoveAll(homeStateDir); err != nil {
+			errs = append(errs, "remove local state dir: "+err.Error())
+		}
+		// If runner.yaml was configured outside ~/.workflowfiesta, remove it too.
+		if configPath != "" && !strings.HasPrefix(configPath, homeStateDir+string(os.PathSeparator)) {
+			if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, "remove custom config: "+err.Error())
+			}
+		}
+
+		if onStop != nil {
+			onStop()
+		}
+		localui.QuitApp()
+
+		if len(errs) > 0 {
+			return fmt.Errorf(strings.Join(errs, "; "))
+		}
+		return nil
+	}
 }
 
 var runCmd = &cobra.Command{
@@ -309,7 +350,7 @@ var runLocalCmd = &cobra.Command{
 			localui.OpenSettingsWindow(localCfg, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
 				cfg.LocalConfig = updated
 				localCfg = updated
-			})
+			}, buildClearConfigurationHandler(cfg, configPath, cancel))
 		})
 		// Show before a.Run() — must be a direct call, not via fyne.Do,
 		// because the Fyne event loop hasn't started yet.
@@ -323,9 +364,16 @@ var runLocalCmd = &cobra.Command{
 			localui.QuitApp()
 		}()
 
-		localui.StartTray(cfg.Name, cancel, sw, localCfg, func(updated *localconfig.LocalConfig) {
+		localui.StartTray(
+			cfg.Name,
+			cancel,
+			buildClearConfigurationHandler(cfg, configPath, cancel),
+			sw,
+			localCfg,
+			func(updated *localconfig.LocalConfig) {
 			cfg.LocalConfig = updated
-		}) // Blocks until app.Quit().
+			},
+		) // Blocks until app.Quit().
 		return nil
 	},
 }
@@ -419,7 +467,7 @@ func main() {
 				localui.OpenSettingsWindow(localCfg2, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
 					cfg.LocalConfig = updated
 					localCfg2 = updated
-				})
+				}, buildClearConfigurationHandler(cfg, localconfig.DefaultPath(), cancel))
 			})
 			sw.Show()
 
@@ -438,9 +486,16 @@ func main() {
 				localui.QuitApp()
 			}()
 
-			localui.SetupTray(cfg.Name, cancel, sw, localCfg2, func(updated *localconfig.LocalConfig) {
-				cfg.LocalConfig = updated
-			})
+			localui.SetupTray(
+				cfg.Name,
+				cancel,
+				buildClearConfigurationHandler(cfg, localconfig.DefaultPath(), cancel),
+				sw,
+				localCfg2,
+				func(updated *localconfig.LocalConfig) {
+					cfg.LocalConfig = updated
+				},
+			)
 		})
 		return
 	}

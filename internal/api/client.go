@@ -177,6 +177,12 @@ func (c *Client) ReportJobFailed(jobID, errMsg string) error {
 	return c.post("/api/runner/jobs/"+jobID+"/fail", map[string]string{"error": errMsg})
 }
 
+// DeleteRunner resets/unregisters the runner on the server.
+// Route: POST /api/runner/:id/reset
+func (c *Client) DeleteRunner(runnerID string) error {
+	return c.post("/api/runner/"+runnerID+"/reset", nil)
+}
+
 // ReportWorktreePath reports the local worktree path for a job to the server.
 func (c *Client) ReportWorktreePath(jobID, worktreePath string) error {
 	return c.post("/api/runner/jobs/"+jobID+"/worktree", map[string]string{"worktree_path": worktreePath})
