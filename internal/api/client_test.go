@@ -313,3 +313,34 @@ func TestGetScript_NotFound(t *testing.T) {
 		t.Error("expected error for 404 response, got nil")
 	}
 }
+
+// ── RequestAgentCancel ────────────────────────────────────────────────────────
+
+func TestRequestAgentCancel(t *testing.T) {
+	var gotPath string
+	var gotMethod string
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server)
+	if err := client.RequestAgentCancel("job-xyz"); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want %q", gotMethod, http.MethodPost)
+	}
+	if gotPath != "/api/runner/jobs/job-xyz/cancel" {
+		t.Errorf("path = %q, want /api/runner/jobs/job-xyz/cancel", gotPath)
+	}
+	if strings.TrimSpace(gotBody) != "" {
+		t.Errorf("expected empty body, got %q", gotBody)
+	}
+}

@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -39,7 +40,9 @@ type Runner struct {
 	executor    executor.Executor
 	toolHandler *executor.ToolHandler
 	sinks       []StatusSink
-	activeJobs  sync.Map     // jobID -> struct{}: deduplicates concurrent polls
+	activeJobs  sync.Map // jobID -> struct{}: deduplicates concurrent polls
+	// jobCancels holds per-job cancel funcs for bash/script jobs (tool jobs are not registered).
+	jobCancels  sync.Map // jobID -> context.CancelFunc
 	semaphore   chan struct{} // limits concurrent job executions
 }
 
@@ -72,6 +75,22 @@ func (r *Runner) WithSink(sink StatusSink) *Runner {
 func (r *Runner) notify(fn func(StatusSink)) {
 	for _, s := range r.sinks {
 		fn(s)
+	}
+}
+
+// StopAgentJob notifies the platform to cancel the agent run (POST /api/runner/cancel)
+// and cancels the local script/bash execution context when applicable.
+func (r *Runner) StopAgentJob(jobID string) error {
+	err := r.client.RequestAgentCancel(jobID)
+	r.cancelLocalJob(jobID)
+	return err
+}
+
+func (r *Runner) cancelLocalJob(jobID string) {
+	if v, ok := r.jobCancels.Load(jobID); ok {
+		if fn, ok := v.(context.CancelFunc); ok {
+			fn()
+		}
 	}
 }
 
@@ -218,7 +237,14 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		}
 	}()
 
-	exitCode, err := r.executor.Execute(ctx, executor.Input{
+	jobCtx, cancelJob := context.WithCancel(ctx)
+	r.jobCancels.Store(job.JobID, cancelJob)
+	defer func() {
+		r.jobCancels.Delete(job.JobID)
+		cancelJob()
+	}()
+
+	exitCode, err := r.executor.Execute(jobCtx, executor.Input{
 		JobID:      job.JobID,
 		Image:      job.DockerImage,
 		Script:     job.Script,
@@ -231,13 +257,24 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	<-doneChan
 
 	if err != nil {
-		log.Errorf("[runner] job %s failed: %v", job.JobID, err)
-		if reportErr := r.client.ReportJobFailed(job.JobID, err.Error()); reportErr != nil {
-			log.Warnf("[runner] report-fail error: %v", reportErr)
+		if errors.Is(err, context.Canceled) {
+			log.Infof("[runner] job %s cancelled locally", job.JobID)
+			if reportErr := r.client.ReportJobFailed(job.JobID, "cancelled from runner (stop agent)"); reportErr != nil {
+				log.Warnf("[runner] report-fail error: %v", reportErr)
+			}
+		} else {
+			log.Errorf("[runner] job %s failed: %v", job.JobID, err)
+			if reportErr := r.client.ReportJobFailed(job.JobID, err.Error()); reportErr != nil {
+				log.Warnf("[runner] report-fail error: %v", reportErr)
+			}
 		}
 		r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, 1) })
 		r.notify(func(s StatusSink) {
-			s.AppendLog("[error] " + err.Error() + "\n")
+			if errors.Is(err, context.Canceled) {
+				s.AppendLog("[runner] job cancelled (stop agent)\n")
+			} else {
+				s.AppendLog("[error] " + err.Error() + "\n")
+			}
 			s.SetIdle()
 		})
 		return
