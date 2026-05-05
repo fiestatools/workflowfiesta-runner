@@ -183,6 +183,12 @@ func (c *Client) DeleteRunner(runnerID string) error {
 	return c.post("/api/runner/"+runnerID+"/reset", nil)
 }
 
+// RequestAgentCancel asks the platform to stop a running job for this runner
+// without tearing down the runner process (POST /api/runner/jobs/:id/cancel).
+func (c *Client) RequestAgentCancel(jobID string) error {
+	return c.post("/api/runner/jobs/"+jobID+"/cancel", nil)
+}
+
 // ReportWorktreePath reports the local worktree path for a job to the server.
 func (c *Client) ReportWorktreePath(jobID, worktreePath string) error {
 	return c.post("/api/runner/jobs/"+jobID+"/worktree", map[string]string{"worktree_path": worktreePath})
