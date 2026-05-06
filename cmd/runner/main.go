@@ -5,17 +5,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	wfapi "workflowfiesta-runner/internal/api"
 	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/localui"
@@ -135,6 +139,77 @@ func truncateCLI(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func() error {
+	return func() error {
+		var errs []string
+
+		// Best-effort: unregister the runner on the server first.
+		if cfg != nil && cfg.APIURL != "" && cfg.Token != "" && cfg.RunnerID != "" {
+			client := wfapi.New(cfg.APIURL, cfg.Token)
+			if cfg.LocalConfig != nil && cfg.LocalConfig.OrgID != "" {
+				client.SetOrgID(cfg.LocalConfig.OrgID)
+			}
+			if err := client.DeleteRunner(cfg.RunnerID); err != nil {
+				// Best-effort only: local reset/relaunch must continue even if server reset fails.
+				log.Warnf("reset runner: delete on server failed: %v", err)
+			}
+		}
+
+		// Clear local persisted state.
+		homeStateDir := filepath.Dir(config.CredentialsFilePath()) // ~/.workflowfiesta
+		if err := os.RemoveAll(homeStateDir); err != nil {
+			errs = append(errs, "remove local state dir: "+err.Error())
+		}
+		// If runner.yaml was configured outside ~/.workflowfiesta, remove it too.
+		if configPath != "" && !strings.HasPrefix(configPath, homeStateDir+string(os.PathSeparator)) {
+			if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, "remove custom config: "+err.Error())
+			}
+		}
+		// Relaunch the app so user lands back in setup/registration flow immediately.
+		exePath, err := os.Executable()
+		if err != nil {
+			errs = append(errs, "resolve executable: "+err.Error())
+		} else {
+			cmd := exec.Command(exePath)
+			// Strip runner credential env so startup detects "not registered".
+			cmd.Env = filteredEnvForRelaunch(os.Environ())
+			if err := cmd.Start(); err != nil {
+				errs = append(errs, "relaunch app: "+err.Error())
+			}
+		}
+
+		if len(errs) > 0 {
+			return errors.New(strings.Join(errs, "; "))
+		}
+		if onStop != nil {
+			onStop()
+		}
+		localui.QuitApp()
+		return nil
+	}
+}
+
+func filteredEnvForRelaunch(env []string) []string {
+	drop := map[string]struct{}{
+		"WORKFLOWFIESTA_TOKEN":       {},
+		"WORKFLOWFIESTA_RUNNER_ID":   {},
+		"WORKFLOWFIESTA_RUNNER_NAME": {},
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			key = kv[:i]
+		}
+		if _, blocked := drop[key]; blocked {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 var runCmd = &cobra.Command{
@@ -311,7 +386,7 @@ var runLocalCmd = &cobra.Command{
 			localui.OpenSettingsWindow(localCfg, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
 				cfg.LocalConfig = updated
 				localCfg = updated
-			})
+			}, buildClearConfigurationHandler(cfg, configPath, cancel))
 		})
 		// Show before a.Run() — must be a direct call, not via fyne.Do,
 		// because the Fyne event loop hasn't started yet.
@@ -324,9 +399,16 @@ var runLocalCmd = &cobra.Command{
 			localui.QuitApp()
 		}()
 
-		localui.StartTray(cfg.Name, cancel, sw, localCfg, func(updated *localconfig.LocalConfig) {
+		localui.StartTray(
+			cfg.Name,
+			cancel,
+			buildClearConfigurationHandler(cfg, configPath, cancel),
+			sw,
+			localCfg,
+			func(updated *localconfig.LocalConfig) {
 			cfg.LocalConfig = updated
-		}) // Blocks until app.Quit().
+			},
+		) // Blocks until app.Quit().
 		return nil
 	},
 }
@@ -422,7 +504,7 @@ func main() {
 				localui.OpenSettingsWindow(localCfg2, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
 					cfg.LocalConfig = updated
 					localCfg2 = updated
-				})
+				}, buildClearConfigurationHandler(cfg, localconfig.DefaultPath(), cancel))
 			})
 			sw.Show()
 
@@ -441,9 +523,16 @@ func main() {
 				localui.QuitApp()
 			}()
 
-			localui.SetupTray(cfg.Name, cancel, sw, localCfg2, func(updated *localconfig.LocalConfig) {
-				cfg.LocalConfig = updated
-			})
+			localui.SetupTray(
+				cfg.Name,
+				cancel,
+				buildClearConfigurationHandler(cfg, localconfig.DefaultPath(), cancel),
+				sw,
+				localCfg2,
+				func(updated *localconfig.LocalConfig) {
+					cfg.LocalConfig = updated
+				},
+			)
 		})
 		return
 	}

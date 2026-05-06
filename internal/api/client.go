@@ -177,6 +177,12 @@ func (c *Client) ReportJobFailed(jobID, errMsg string) error {
 	return c.post("/api/runner/jobs/"+jobID+"/fail", map[string]string{"error": errMsg})
 }
 
+// DeleteRunner resets/unregisters the runner on the server.
+// Route: POST /api/runner/:id/reset
+func (c *Client) DeleteRunner(runnerID string) error {
+	return c.post("/api/runner/"+runnerID+"/reset", nil)
+}
+
 // RequestAgentCancel asks the platform to stop a running job for this runner
 // without tearing down the runner process (POST /api/runner/jobs/:id/cancel).
 func (c *Client) RequestAgentCancel(jobID string) error {

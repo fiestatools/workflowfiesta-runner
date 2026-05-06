@@ -344,3 +344,31 @@ func TestRequestAgentCancel(t *testing.T) {
 		t.Errorf("expected empty body, got %q", gotBody)
 	}
 }
+
+func TestDeleteRunner(t *testing.T) {
+	var gotPath string
+	var gotMethod string
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server)
+	if err := client.DeleteRunner("runner-123"); err != nil {
+		t.Fatalf("DeleteRunner failed: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want %q", gotMethod, http.MethodPost)
+	}
+	if gotPath != "/api/runner/runner-123/reset" {
+		t.Errorf("path = %q, want /api/runner/runner-123/reset", gotPath)
+	}
+	if strings.TrimSpace(gotBody) != "" {
+		t.Errorf("expected empty body, got %q", gotBody)
+	}
+}

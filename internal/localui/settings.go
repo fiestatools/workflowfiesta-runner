@@ -3,12 +3,14 @@
 package localui
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
@@ -17,7 +19,8 @@ import (
 
 // OpenSettingsWindow opens the settings window and returns it.
 // onSave is called with the updated config when the user clicks "Save & Close".
-func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave func(*localconfig.LocalConfig)) fyne.Window {
+// onResetRunner is called when user confirms "Reset Runner".
+func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave func(*localconfig.LocalConfig), onResetRunner func() error) fyne.Window {
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta Runner · Settings")
 	win.Resize(fyne.NewSize(600, 520))
@@ -165,9 +168,34 @@ func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave 
 	})
 	openAuditBtn.Importance = widget.LowImportance
 
+	resetRunnerBtn := newButton("Reset Runner", func() {
+		if onResetRunner == nil {
+			return
+		}
+		dialog.ShowConfirm(
+			"Reset Runner",
+			"This will unregister this runner from the server and clear local runner configuration.\n\nYou will need to register again. Continue?",
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				go func() {
+					if err := onResetRunner(); err != nil {
+						fyne.Do(func() {
+							dialog.ShowError(fmt.Errorf("reset runner: %w", err), win)
+						})
+					}
+				}()
+			},
+			win,
+		)
+	})
+	resetRunnerBtn.Importance = widget.DangerImportance
+
 	actionsSection := container.NewVBox(
 		makeSectionLabel("Actions"),
 		openAuditBtn,
+		resetRunnerBtn,
 	)
 
 	// ── Scrollable body ───────────────────────────────────────────────────────

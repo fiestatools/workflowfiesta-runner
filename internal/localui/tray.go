@@ -3,11 +3,13 @@
 package localui
 
 import (
+	"fmt"
 	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 
 	"workflowfiesta-runner/internal/localconfig"
@@ -39,7 +41,7 @@ func QuitApp() {
 // SetupTray configures the system tray icon and menu without starting the event
 // loop. Call this before a.Run() when you need to manage the loop yourself.
 // cfg and onConfigSaved are used for the Settings menu item; both may be nil.
-func SetupTray(runnerName string, onStop func(), sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
+func SetupTray(runnerName string, onStop func(), onClearConfig func() error, sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
 	a := getApp()
 	if desk, ok := a.(desktop.App); ok {
 		var showItem *fyne.MenuItem
@@ -49,14 +51,41 @@ func SetupTray(runnerName string, onStop func(), sw *StatusWindow, cfg *localcon
 
 		settingsItem := fyne.NewMenuItem("Settings…", func() {
 			if cfg != nil {
-				OpenSettingsWindow(cfg, localconfig.DefaultPath(), onConfigSaved)
+				OpenSettingsWindow(cfg, localconfig.DefaultPath(), onConfigSaved, onClearConfig)
 			}
+		})
+		clearCfgItem := fyne.NewMenuItem("Clear Configuration…", func() {
+			if onClearConfig == nil {
+				return
+			}
+			runClear := func() {
+				if err := onClearConfig(); err != nil {
+					if sw != nil {
+						dialog.ShowError(fmt.Errorf("reset runner: %w", err), sw.win)
+					}
+				}
+			}
+			if sw == nil {
+				runClear()
+				return
+			}
+			dialog.ShowConfirm(
+				"Reset Runner",
+				"This will unregister this runner from the server and clear local runner configuration.\n\nYou will need to register again. Continue?",
+				func(ok bool) {
+					if ok {
+						runClear()
+					}
+				},
+				sw.win,
+			)
 		})
 
 		items := []*fyne.MenuItem{
 			fyne.NewMenuItem("WorkflowFiesta Runner · running", nil),
 			fyne.NewMenuItemSeparator(),
 			settingsItem,
+			clearCfgItem,
 		}
 		if showItem != nil {
 			items = append(items, showItem)
@@ -80,8 +109,8 @@ func SetupTray(runnerName string, onStop func(), sw *StatusWindow, cfg *localcon
 // Blocks until the event loop exits. onStop is called on "Stop Runner".
 // sw is the StatusWindow to show/re-open from the tray menu; may be nil.
 // cfg and onConfigSaved are passed to the Settings menu item.
-func StartTray(runnerName string, onStop func(), sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
-	SetupTray(runnerName, onStop, sw, cfg, onConfigSaved)
+func StartTray(runnerName string, onStop func(), onClearConfig func() error, sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
+	SetupTray(runnerName, onStop, onClearConfig, sw, cfg, onConfigSaved)
 	getApp().Run()
 }
 
