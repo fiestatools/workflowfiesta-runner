@@ -703,7 +703,11 @@ func makeLabeledEntryInfo(label string, entry *widget.Entry, hint *canvas.Text, 
 // the runner's name/uid/environment for the runner to persist locally.
 func callRegisterAPI(apiURL, code string) (*RegistrationResult, error) {
 	apiURL = strings.TrimRight(apiURL, "/")
-	reqBody := map[string]string{"code": code}
+	reqBody := map[string]string{
+		"code":          code,
+		"documentsPath": platform.DocumentsPath(),
+		"shell":         platform.Shell(),
+	}
 	bodyBytes, _ := json.Marshal(reqBody)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(bodyBytes))

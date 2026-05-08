@@ -23,6 +23,7 @@ import (
 	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/localui"
+	"workflowfiesta-runner/internal/platform"
 	"workflowfiesta-runner/internal/runner"
 )
 
@@ -270,7 +271,11 @@ The code embeds your organization, so you only need ONE thing: the code.`,
 		}
 		apiURL = strings.TrimRight(apiURL, "/")
 
-		body, _ := json.Marshal(map[string]string{"code": code})
+		body, _ := json.Marshal(map[string]string{
+			"code":          code,
+			"documentsPath": platform.DocumentsPath(),
+			"shell":         platform.Shell(),
+		})
 
 		resp, err := http.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(body))
 		if err != nil {

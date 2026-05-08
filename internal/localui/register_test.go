@@ -23,12 +23,18 @@ func TestCallRegisterAPI_Success(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		// Verify the request body shape — only `code` is sent now.
+		// Verify the request body shape.
 		body, _ := io.ReadAll(r.Body)
 		var req map[string]string
 		_ = json.Unmarshal(body, &req)
 		if req["code"] == "" {
 			t.Errorf("request body missing 'code' field: %s", body)
+		}
+		if _, ok := req["documentsPath"]; !ok {
+			t.Errorf("request body missing 'documentsPath' field: %s", body)
+		}
+		if _, ok := req["shell"]; !ok {
+			t.Errorf("request body missing 'shell' field: %s", body)
 		}
 		if _, ok := req["name"]; ok {
 			t.Errorf("request body should not include 'name' (server holds the name): %s", body)
