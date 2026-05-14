@@ -22,7 +22,12 @@ type approvalState struct {
 	allowSessionBtn *cursorButton
 	alwaysAllowBtn  *cursorButton
 	denyBtn         *cursorButton
-	stopTick        func()
+	stopTick func()
+}
+
+// footerButtons returns action buttons in left-to-right visual order for Tab / arrows.
+func (s *approvalState) footerButtons() []*cursorButton {
+	return []*cursorButton{s.denyBtn, s.allowSessionBtn, s.alwaysAllowBtn, s.allowBtn}
 }
 
 func newApprovalState() *approvalState {
@@ -147,6 +152,16 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 	win.SetContent(container.NewVBox(header, body, footer))
 	win.SetOnClosed(func() { s.decide(ApprovalDeny) })
 
+	// Keyboard: Fyne never dispatches canvas CustomShortcut with modifier 0, and
+	// widget.Button only activates on Space. Wire Escape / arrows on footer buttons.
+	c := win.Canvas()
+	escape := func() { fyne.Do(func() { s.decide(ApprovalDeny) }) }
+	arrow := func(delta int) { s.moveFooterFocus(c, delta) }
+	for _, btn := range []*cursorButton{s.denyBtn, s.allowSessionBtn, s.alwaysAllowBtn, s.allowBtn} {
+		btn.OnEscape = escape
+		btn.OnArrow = arrow
+	}
+
 	// ── countdown ticker ─────────────────────────────────────────────────────
 	stopped := make(chan struct{})
 	s.stopTick = sync.OnceFunc(func() { close(stopped) })
@@ -209,6 +224,28 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 	return win
 }
 
+// moveFooterFocus moves keyboard focus among the four footer action buttons.
+func (s *approvalState) moveFooterFocus(c fyne.Canvas, delta int) {
+	buttons := s.footerButtons()
+	n := len(buttons)
+	if n == 0 {
+		return
+	}
+	fyne.Do(func() {
+		idx := 0
+		if f := c.Focused(); f != nil {
+			for i, b := range buttons {
+				if f == b {
+					idx = i
+					break
+				}
+			}
+		}
+		idx = ((idx + delta) % n + n) % n
+		c.Focus(buttons[idx])
+	})
+}
+
 // RequestApproval shows an approval dialog and blocks until the user decides or timeout.
 func RequestApproval(req ApprovalRequest) ApprovalResult {
 	if Headless {
@@ -223,6 +260,9 @@ func fyneApproval(req ApprovalRequest) ApprovalResult {
 	restoreApprovalPosition(win)
 	win.Show()
 	win.RequestFocus()
+	fyne.Do(func() {
+		win.Canvas().Focus(s.allowBtn)
+	})
 
 	if req.PlaySound {
 		playApprovalSound()
