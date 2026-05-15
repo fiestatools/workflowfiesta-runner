@@ -27,12 +27,18 @@ var RunnerCapabilities = []string{"tool_dispatch", "script_library", "git_worktr
 
 // StatusSink receives runner lifecycle events for display in a UI or CLI.
 type StatusSink interface {
+	SetConnecting()
+	SetReconnecting()
 	SetConnected(connected bool)
 	SetIdle()
 	SetJobRunning(jobID, image, scriptBlurb string)
 	SetJobComplete(jobID, image string, exitCode int)
 	AppendLog(line string)
 }
+
+// apiFailureThreshold is how many consecutive API errors (poll or heartbeat)
+// are required before marking the runner as disconnected from the platform.
+const apiFailureThreshold = 2
 
 type Runner struct {
 	cfg         *config.Config
@@ -44,6 +50,10 @@ type Runner struct {
 	// jobCancels holds per-job cancel funcs for bash/script jobs (tool jobs are not registered).
 	jobCancels  sync.Map // jobID -> context.CancelFunc
 	semaphore   chan struct{} // limits concurrent job executions
+
+	connMu       sync.Mutex
+	apiReachable bool
+	apiFailures  int
 }
 
 func New(cfg *config.Config) *Runner {
@@ -78,6 +88,32 @@ func (r *Runner) notify(fn func(StatusSink)) {
 	}
 }
 
+func (r *Runner) recordAPISuccess() {
+	r.connMu.Lock()
+	wasReachable := r.apiReachable
+	r.apiFailures = 0
+	r.apiReachable = true
+	r.connMu.Unlock()
+	if !wasReachable {
+		r.notify(func(s StatusSink) { s.SetConnected(true) })
+	}
+}
+
+func (r *Runner) recordAPIFailure() {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
+	if !r.apiReachable {
+		r.apiFailures++
+		return
+	}
+	r.apiFailures++
+	if r.apiFailures >= apiFailureThreshold {
+		r.apiReachable = false
+		r.apiFailures = 0
+		r.notify(func(s StatusSink) { s.SetReconnecting() })
+	}
+}
+
 // StopAgentJob notifies the platform to cancel the agent run (POST /api/runner/cancel)
 // and cancels the local script/bash execution context when applicable.
 func (r *Runner) StopAgentJob(jobID string) error {
@@ -96,6 +132,7 @@ func (r *Runner) cancelLocalJob(jobID string) {
 
 func (r *Runner) Run(ctx context.Context) error {
 	log.Info("[runner] starting HTTP poll loop")
+	r.notify(func(s StatusSink) { s.SetConnecting() })
 
 	// Send initial heartbeat so the API marks us online immediately.
 	// Response includes org_id — use it to namespace the script library and
@@ -103,21 +140,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	orgID, err := r.client.SendHeartbeat("idle", RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
 	if err != nil {
 		log.Warnf("[runner] initial heartbeat failed: %v", err)
-	} else if orgID != "" {
-		r.client.SetOrgID(orgID)
-		r.toolHandler.SetOrgID(orgID)
-		r.toolHandler.SetSyncer(r.client)
-		// Persist org_id to runner.yaml if it changed.
-		if r.cfg.LocalConfig != nil && r.cfg.LocalConfig.OrgID != orgID {
-			r.cfg.LocalConfig.OrgID = orgID
-			if saveErr := localconfig.Save(r.cfg.LocalConfig, localconfig.DefaultPath()); saveErr != nil {
-				log.Warnf("[runner] failed to persist org_id: %v", saveErr)
-			}
-		}
-		// Pull server scripts on startup — bootstrap org library.
-		go r.syncServerScripts(orgID)
+		r.recordAPIFailure()
+	} else {
+		r.applyHeartbeatOrgID(orgID)
+		r.recordAPISuccess()
 	}
-	r.notify(func(s StatusSink) { s.SetConnected(true) })
 
 	go r.heartbeatLoop(ctx)
 
@@ -136,8 +163,10 @@ func (r *Runner) Run(ctx context.Context) error {
 			job, _, err := r.client.PollNextJob()
 			if err != nil {
 				log.Warnf("[runner] poll error: %v", err)
+				r.recordAPIFailure()
 				continue
 			}
+			r.recordAPISuccess()
 			if job == nil {
 				continue // no pending job
 			}
@@ -435,6 +464,26 @@ func (r *Runner) handleToolJob(job api.Job) {
 	r.notify(func(s StatusSink) { s.SetIdle() })
 }
 
+func (r *Runner) applyHeartbeatOrgID(orgID string) {
+	if orgID == "" {
+		return
+	}
+	r.client.SetOrgID(orgID)
+	if r.toolHandler != nil {
+		r.toolHandler.SetOrgID(orgID)
+		r.toolHandler.SetSyncer(r.client)
+	}
+	// Persist org_id to runner.yaml if it changed.
+	if r.cfg.LocalConfig != nil && r.cfg.LocalConfig.OrgID != orgID {
+		r.cfg.LocalConfig.OrgID = orgID
+		if saveErr := localconfig.Save(r.cfg.LocalConfig, localconfig.DefaultPath()); saveErr != nil {
+			log.Warnf("[runner] failed to persist org_id: %v", saveErr)
+		}
+	}
+	// Pull server scripts on startup — bootstrap org library.
+	go r.syncServerScripts(orgID)
+}
+
 func (r *Runner) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -449,9 +498,14 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 				status = "busy"
 				return false // stop after first
 			})
-			if _, err := r.client.SendHeartbeat(status, RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version); err != nil {
+			orgID, err := r.client.SendHeartbeat(status, RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
+			if err != nil {
 				log.Warnf("[runner] heartbeat failed: %v", err)
+				r.recordAPIFailure()
+				continue
 			}
+			r.applyHeartbeatOrgID(orgID)
+			r.recordAPISuccess()
 		}
 	}
 }
