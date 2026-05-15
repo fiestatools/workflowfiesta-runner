@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -31,11 +32,12 @@ const HasGUI = true
 // startFn is called (on the Fyne goroutine) once the runner should start. It
 // receives the fully-populated Config and should: open a StatusWindow, wire up
 // signal handling, start the runner goroutine, and call SetupTray — all
-// non-blocking. RunAutoLaunch then calls a.Run() which blocks until QuitApp().
+// non-blocking. It returns the status window so the setup wizard can observe
+// connection progress. RunAutoLaunch then calls a.Run() which blocks until QuitApp().
 //
 // Keeping startFn as a callback avoids an import cycle between localui and
 // the runner package (executor/local.go imports localui for approval prompts).
-func RunAutoLaunch(configPath string, startFn func(*config.Config)) {
+func RunAutoLaunch(configPath string, startFn func(*config.Config) *StatusWindow) {
 	cfg := config.Load() // auto-loads ~/.workflowfiesta/credentials.env if no env vars
 
 	a := getApp()
@@ -48,7 +50,7 @@ func RunAutoLaunch(configPath string, startFn func(*config.Config)) {
 		}
 		cfg.ExecutorType = "local"
 		cfg.LocalConfig = localCfg
-		startFn(cfg) // opens windows + tray before a.Run() — that's fine
+		_ = startFn(cfg) // opens windows + tray before a.Run() — that's fine
 	} else {
 		// First run: show setup wizard; startFn is called on save.
 		showFirstRunWizard(a, configPath, startFn)
@@ -66,7 +68,7 @@ func RunAutoLaunch(configPath string, startFn func(*config.Config)) {
 //	Screen 3 — Starting… (not counted)
 //
 // Uses win.Show() — NOT ShowAndRun — so the caller owns the event loop.
-func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Config)) {
+func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Config) *StatusWindow) {
 	win := a.NewWindow("WorkflowFiesta · Setup")
 	win.Resize(fyne.NewSize(520, 560))
 	win.CenterOnScreen()
@@ -320,16 +322,25 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			"Plays a system notification sound when an approval dialog appears.\n\nUseful when the runner window is in the background.")),
 	)
 
-	// Transition: launching (not a numbered step)
-	launchTitle := canvas.NewText("Runner is starting…", colorText)
+	// Transition: launching (not a numbered step) — shows live connection status.
+	launchTitle := canvas.NewText("Starting runner…", colorText)
 	launchTitle.TextSize = 14
 	launchTitle.TextStyle = fyne.TextStyle{Bold: true}
-	launchSub := canvas.NewText("The status window will appear shortly.", colorMuted)
+	launchSub := canvas.NewText("Connecting to WorkflowFiesta. This usually takes a few seconds.", colorMuted)
 	launchSub.TextSize = 12
+	launchConnDot := canvas.NewCircle(color.NRGBA{R: 59, G: 130, B: 246, A: 255})
+	launchConnDot.StrokeWidth = 0
+	launchConnStatus := canvas.NewText("Waiting for connection…", colorMuted)
+	launchConnStatus.TextSize = 12
+	launchConnRow := container.NewHBox(
+		container.New(layout.NewGridWrapLayout(fyne.NewSize(8, 8)), launchConnDot),
+		container.NewWithoutLayout(launchConnStatus),
+	)
 
 	step3 := container.NewCenter(container.NewVBox(
 		container.NewWithoutLayout(launchTitle),
 		container.NewWithoutLayout(launchSub),
+		container.NewPadded(launchConnRow),
 	))
 
 	steps := []fyne.CanvasObject{step0, step1, step2, step3}
@@ -417,7 +428,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			return
 		}
 
-		// Show transition screen, start runner, hide wizard.
+		// Show transition screen, start runner, wait for platform connection.
 		setStep(3)
 
 		cfg := &config.Config{
@@ -428,8 +439,40 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			ExecutorType: "local",
 			LocalConfig:  localCfg,
 		}
-		startFn(cfg) // opens status window + tray (non-blocking)
-		win.Hide()
+		sw := startFn(cfg) // opens status window + tray (non-blocking)
+		if sw != nil {
+			sw.SetOnAPIConnected(func() {
+				fyne.Do(func() {
+					launchTitle.Text = "Connected!"
+					launchTitle.Refresh()
+					launchSub.Text = "Your runner is online and ready to receive jobs."
+					launchSub.Refresh()
+					launchConnDot.FillColor = colorSuccess
+					canvas.Refresh(launchConnDot)
+					launchConnStatus.Text = "✓ Connected to WorkflowFiesta"
+					launchConnStatus.Color = colorSuccess
+					launchConnStatus.Refresh()
+					time.AfterFunc(2*time.Second, func() {
+						fyne.Do(win.Hide)
+					})
+				})
+			})
+			go func() {
+				time.Sleep(90 * time.Second)
+				fyne.Do(func() {
+					if sw.APIConnected() || currentStep != 3 {
+						return
+					}
+					launchSub.Text = "Still connecting. Check your network and API URL in the status window."
+					launchSub.Refresh()
+					launchConnStatus.Text = "Connection is taking longer than expected"
+					launchConnStatus.Color = colorAmber
+					launchConnStatus.Refresh()
+				})
+			}()
+		} else {
+			win.Hide()
+		}
 	}
 
 	// ── layout ────────────────────────────────────────────────────────────────

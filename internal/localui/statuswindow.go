@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -47,7 +48,9 @@ var (
 type runnerState int
 
 const (
-	stateDisconnected runnerState = iota
+	stateConnecting runnerState = iota
+	stateReconnecting
+	stateDisconnected
 	stateIdle
 	stateRunning
 )
@@ -124,6 +127,11 @@ type StatusWindow struct {
 
 	// onOpenSettings is called when the user clicks the settings gear button.
 	onOpenSettings func()
+
+	// onAPIConnected fires once when the runner first reaches the platform.
+	onAPIConnected     func()
+	onAPIConnectedOnce sync.Once
+	apiConnectedFlag   atomic.Bool
 }
 
 // NewStatusWindow creates the status window (does not show it yet).
@@ -237,10 +245,10 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 	)
 
 	// Badge
-	sw.badgeDot = canvas.NewCircle(colorDanger)
+	sw.badgeDot = canvas.NewCircle(color.NRGBA{R: 59, G: 130, B: 246, A: 255})
 	sw.badgeDot.StrokeWidth = 0
 	dotCell := container.New(layout.NewGridWrapLayout(fyne.NewSize(8, 8)), sw.badgeDot)
-	sw.badgeText = canvas.NewText("Offline", colorDanger)
+	sw.badgeText = canvas.NewText("Connecting", color.NRGBA{R: 59, G: 130, B: 246, A: 255})
 	sw.badgeText.TextSize = 11
 	sw.badgeText.TextStyle = fyne.TextStyle{Bold: true}
 	badgeInner := container.NewHBox(
@@ -248,7 +256,7 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 		sw.badgeText,
 		layout.NewSpacer(),
 	)
-	sw.badgeBg = canvas.NewRectangle(colorDangerDim)
+	sw.badgeBg = canvas.NewRectangle(colorPrimaryDim)
 	sw.badgeBg.CornerRadius = 10
 	badge := container.NewStack(sw.badgeBg, container.NewPadded(badgeInner))
 
@@ -483,6 +491,20 @@ func (sw *StatusWindow) SetOnOpenSettings(fn func()) {
 	sw.onOpenSettings = fn
 }
 
+// SetOnAPIConnected registers a one-shot callback when the runner first
+// successfully heartbeats to the platform. Safe to call from any goroutine.
+func (sw *StatusWindow) SetOnAPIConnected(fn func()) {
+	sw.onAPIConnected = fn
+	if sw.apiConnectedFlag.Load() && fn != nil {
+		fn()
+	}
+}
+
+// APIConnected reports whether the runner has reached the platform at least once.
+func (sw *StatusWindow) APIConnected() bool {
+	return sw.apiConnectedFlag.Load()
+}
+
 // SetStopAgentHandler registers the callback used by "Stop Agent" (POST /api/runner/jobs/:id/cancel).
 // Pass nil to leave the button permanently disabled.
 func (sw *StatusWindow) SetStopAgentHandler(fn func(jobID string) error) {
@@ -492,10 +514,49 @@ func (sw *StatusWindow) SetStopAgentHandler(fn func(jobID string) error) {
 	})
 }
 
+func (sw *StatusWindow) fireAPIConnected() {
+	sw.onAPIConnectedOnce.Do(func() {
+		sw.apiConnectedFlag.Store(true)
+		if sw.onAPIConnected != nil {
+			sw.onAPIConnected()
+		}
+	})
+}
+
+// SetConnecting marks the runner as waiting for the first platform heartbeat.
+func (sw *StatusWindow) SetConnecting() {
+	fyne.Do(func() {
+		sw.state = stateConnecting
+		sw.hostLabel.Text = "Connecting to WorkflowFiesta…"
+		sw.hostLabel.Color = colorLabel
+		sw.ctaBanner.Hide()
+		sw.refreshStopAgentButton()
+		sw.hostLabel.Refresh()
+		sw.ctaBanner.Refresh()
+		sw.refreshBadge()
+	})
+}
+
+// SetReconnecting marks a temporary loss of connectivity to the platform.
+func (sw *StatusWindow) SetReconnecting() {
+	fyne.Do(func() {
+		sw.state = stateReconnecting
+		sw.hostLabel.Text = "Reconnecting to server…"
+		sw.hostLabel.Color = colorAmber
+		sw.ctaBanner.Hide()
+		sw.activeJobID = ""
+		sw.refreshStopAgentButton()
+		sw.hostLabel.Refresh()
+		sw.ctaBanner.Refresh()
+		sw.refreshBadge()
+	})
+}
+
 // SetConnected updates the connection indicator.
 func (sw *StatusWindow) SetConnected(connected bool) {
 	fyne.Do(func() {
 		if connected {
+			firstConnect := !sw.apiConnectedFlag.Load()
 			if sw.activeJobCount() > 0 {
 				sw.state = stateRunning
 			} else {
@@ -504,10 +565,14 @@ func (sw *StatusWindow) SetConnected(connected bool) {
 			sw.hostLabel.Text = sw.apiURL
 			sw.hostLabel.Color = colorMuted
 			sw.ctaBanner.Show()
+			if firstConnect {
+				sw.appendToLog(fmt.Sprintf("[runner] Connected to %s\n", sw.apiURL))
+			}
+			sw.fireAPIConnected()
 		} else {
 			sw.state = stateDisconnected
 			sw.activeJobID = ""
-			sw.hostLabel.Text = "connecting..."
+			sw.hostLabel.Text = "Offline"
 			sw.hostLabel.Color = colorLabel
 			sw.ctaBanner.Hide()
 			sw.refreshStopAgentButton()
@@ -636,6 +701,16 @@ func (sw *StatusWindow) refreshStopAgentButton() {
 
 func (sw *StatusWindow) refreshBadge() {
 	switch sw.state {
+	case stateConnecting:
+		sw.badgeBg.FillColor = colorPrimaryDim
+		sw.badgeDot.FillColor = color.NRGBA{R: 59, G: 130, B: 246, A: 255}
+		sw.badgeText.Text = "Connecting"
+		sw.badgeText.Color = color.NRGBA{R: 59, G: 130, B: 246, A: 255}
+	case stateReconnecting:
+		sw.badgeBg.FillColor = colorAmberDim
+		sw.badgeDot.FillColor = colorAmber
+		sw.badgeText.Text = "Reconnecting"
+		sw.badgeText.Color = colorAmber
 	case stateDisconnected:
 		sw.badgeBg.FillColor = colorDangerDim
 		sw.badgeDot.FillColor = colorDanger

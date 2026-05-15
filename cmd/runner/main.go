@@ -83,6 +83,16 @@ type cliSink struct {
 	name   string
 }
 
+func (s *cliSink) SetConnecting() {
+	fmt.Printf("\n%s●%s Connecting  %s%s → %s%s\n",
+		ansiGray, ansiReset, ansiGray, s.name, s.apiURL, ansiReset)
+}
+
+func (s *cliSink) SetReconnecting() {
+	fmt.Printf("\n%s●%s Reconnecting  %s%s → %s%s\n",
+		ansiYellow, ansiReset, ansiGray, s.name, s.apiURL, ansiReset)
+}
+
 func (s *cliSink) SetConnected(connected bool) {
 	if connected {
 		fmt.Printf("\n%s●%s Connected  %s%s → %s%s\n\n",
@@ -492,19 +502,19 @@ func main() {
 		}
 
 		// GUI build: open the first-run wizard or status window.
-		localui.RunAutoLaunch(localconfig.DefaultPath(), func(cfg *config.Config) {
+		localui.RunAutoLaunch(localconfig.DefaultPath(), func(cfg *config.Config) *localui.StatusWindow {
 			ctx, cancel := context.WithCancel(context.Background())
 
 			r := runner.New(cfg)
 			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
 			sw.SetStopAgentHandler(r.StopAgentJob)
 			localCfg2 := cfg.LocalConfig
-			// Wire up the settings gear button on the status window.
+			configPath := localconfig.DefaultPath()
 			sw.SetOnOpenSettings(func() {
-				localui.OpenSettingsWindow(localCfg2, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
+				localui.OpenSettingsWindow(localCfg2, configPath, func(updated *localconfig.LocalConfig) {
 					cfg.LocalConfig = updated
 					localCfg2 = updated
-				}, buildClearConfigurationHandler(cfg, localconfig.DefaultPath(), cancel))
+				}, buildClearConfigurationHandler(cfg, configPath, cancel))
 			})
 			sw.Show()
 
@@ -526,13 +536,14 @@ func main() {
 			localui.SetupTray(
 				cfg.Name,
 				cancel,
-				buildClearConfigurationHandler(cfg, localconfig.DefaultPath(), cancel),
+				buildClearConfigurationHandler(cfg, configPath, cancel),
 				sw,
 				localCfg2,
 				func(updated *localconfig.LocalConfig) {
 					cfg.LocalConfig = updated
 				},
 			)
+			return sw
 		})
 		return
 	}
