@@ -11,6 +11,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+
+	"workflowfiesta-runner/internal/platform"
 )
 
 type Job struct {
@@ -128,11 +130,13 @@ func (c *Client) PollNextJob() (*Job, int, error) {
 // Returns the runner's org_id from the server.
 func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarch, version string) (string, error) {
 	resp, err := c.do("POST", "/api/runner/heartbeat", map[string]interface{}{
-		"status":       status,
-		"capabilities": capabilities,
-		"os":           goos,
-		"arch":         goarch,
-		"version":      version,
+		"status":        status,
+		"capabilities":  capabilities,
+		"os":            goos,
+		"arch":          goarch,
+		"version":       version,
+		"documentsPath": platform.DocumentsPath(),
+		"shell":         platform.Shell(),
 	})
 	if err != nil {
 		return "", err
