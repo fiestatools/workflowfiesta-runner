@@ -68,6 +68,26 @@ func TestClient_PollNextJob_WithJob(t *testing.T) {
 	}
 }
 
+func TestClient_PollNextJob_AuthRevoked(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server)
+	_, status, err := client.PollNextJob()
+	if err == nil {
+		t.Fatal("expected error for 401 response, got nil")
+	}
+	if status != 401 {
+		t.Errorf("expected status 401, got %d", status)
+	}
+	if !api.IsAuthRevoked(err) {
+		t.Errorf("expected ErrAuthRevoked, got %v", err)
+	}
+}
+
 // ── SendHeartbeat ─────────────────────────────────────────────────────────────
 
 func TestSendHeartbeat_SendsCapabilities(t *testing.T) {

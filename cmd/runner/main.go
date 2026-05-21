@@ -152,6 +152,65 @@ func truncateCLI(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
+// clearLocalRunnerState removes credentials and runner.yaml so the next launch
+// shows the registration flow. Does not call the server (runner may already be deleted).
+func clearLocalRunnerState(configPath string) error {
+	homeStateDir := filepath.Dir(config.CredentialsFilePath()) // ~/.workflowfiesta
+	if err := os.RemoveAll(homeStateDir); err != nil {
+		return fmt.Errorf("remove local state dir: %w", err)
+	}
+	if configPath != "" && !strings.HasPrefix(configPath, homeStateDir+string(os.PathSeparator)) {
+		if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove custom config: %w", err)
+		}
+	}
+	return nil
+}
+
+func relaunchRunnerApp() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	cmd := exec.Command(exePath)
+	cmd.Env = filteredEnvForRelaunch(os.Environ())
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("relaunch app: %w", err)
+	}
+	return nil
+}
+
+// buildRegistrationRevokedHandler clears local credentials when the server
+// rejects the runner token (e.g. runner deleted in the admin UI).
+func buildRegistrationRevokedHandler(configPath string, onStop func()) func() {
+	return func() {
+		log.Warn("[runner] runner registration is no longer valid on the server — logging out locally")
+		if err := clearLocalRunnerState(configPath); err != nil {
+			log.Warnf("[runner] clear local state: %v", err)
+		}
+		if onStop != nil {
+			onStop()
+		}
+		if err := relaunchRunnerApp(); err != nil {
+			log.Warnf("[runner] relaunch: %v", err)
+		}
+		localui.QuitApp()
+	}
+}
+
+func newRunnerWithLogout(cfg *config.Config, configPath string, onStop func()) *runner.Runner {
+	return runner.New(cfg).WithOnRegistrationRevoked(buildRegistrationRevokedHandler(configPath, onStop))
+}
+
+func runRunner(ctx context.Context, r *runner.Runner) error {
+	err := r.Run(ctx)
+	if errors.Is(err, runner.ErrRegistrationRevoked) {
+		log.Info("[runner] logged out — register again to continue")
+		return nil
+	}
+	return err
+}
+
 func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func() error {
 	return func() error {
 		var errs []string
@@ -168,28 +227,11 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 			}
 		}
 
-		// Clear local persisted state.
-		homeStateDir := filepath.Dir(config.CredentialsFilePath()) // ~/.workflowfiesta
-		if err := os.RemoveAll(homeStateDir); err != nil {
-			errs = append(errs, "remove local state dir: "+err.Error())
+		if err := clearLocalRunnerState(configPath); err != nil {
+			errs = append(errs, err.Error())
 		}
-		// If runner.yaml was configured outside ~/.workflowfiesta, remove it too.
-		if configPath != "" && !strings.HasPrefix(configPath, homeStateDir+string(os.PathSeparator)) {
-			if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
-				errs = append(errs, "remove custom config: "+err.Error())
-			}
-		}
-		// Relaunch the app so user lands back in setup/registration flow immediately.
-		exePath, err := os.Executable()
-		if err != nil {
-			errs = append(errs, "resolve executable: "+err.Error())
-		} else {
-			cmd := exec.Command(exePath)
-			// Strip runner credential env so startup detects "not registered".
-			cmd.Env = filteredEnvForRelaunch(os.Environ())
-			if err := cmd.Start(); err != nil {
-				errs = append(errs, "relaunch app: "+err.Error())
-			}
+		if err := relaunchRunnerApp(); err != nil {
+			errs = append(errs, err.Error())
 		}
 
 		if len(errs) > 0 {
@@ -253,8 +295,9 @@ var runCmd = &cobra.Command{
 			cancel()
 		}()
 
-		r := runner.New(cfg).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
-		return r.Run(ctx)
+		configPath := localconfig.DefaultPath()
+		r := newRunnerWithLogout(cfg, configPath, cancel).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
+		return runRunner(ctx, r)
 	},
 }
 
@@ -386,14 +429,14 @@ var runLocalCmd = &cobra.Command{
 		}()
 
 		if headless {
-			r := runner.New(cfg).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
-			return r.Run(ctx)
+			r := newRunnerWithLogout(cfg, configPath, cancel).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
+			return runRunner(ctx, r)
 		}
 
 		// GUI mode: open status window + system tray.
 		// The runner runs in a goroutine; Fyne event loop on main thread.
 		// macOS requires the GUI event loop on the main OS thread.
-		r := runner.New(cfg)
+		r := newRunnerWithLogout(cfg, configPath, cancel)
 		sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
 		sw.SetStopAgentHandler(r.StopAgentJob)
 		// Wire up the settings gear button on the status window.
@@ -408,7 +451,7 @@ var runLocalCmd = &cobra.Command{
 		sw.Show()
 
 		go func() {
-			if err := r.WithSink(sw).Run(ctx); err != nil {
+			if err := runRunner(ctx, r.WithSink(sw)); err != nil {
 				log.Errorf("Runner stopped: %v", err)
 			}
 			localui.QuitApp()
@@ -509,12 +552,12 @@ func main() {
 		// GUI build: open the first-run wizard or status window.
 		localui.RunAutoLaunch(localconfig.DefaultPath(), func(cfg *config.Config) *localui.StatusWindow {
 			ctx, cancel := context.WithCancel(context.Background())
+			configPath := localconfig.DefaultPath()
 
-			r := runner.New(cfg)
+			r := newRunnerWithLogout(cfg, configPath, cancel)
 			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
 			sw.SetStopAgentHandler(r.StopAgentJob)
 			localCfg2 := cfg.LocalConfig
-			configPath := localconfig.DefaultPath()
 			sw.SetOnOpenSettings(func() {
 				localui.OpenSettingsWindow(localCfg2, configPath, func(updated *localconfig.LocalConfig) {
 					cfg.LocalConfig = updated
@@ -532,7 +575,7 @@ func main() {
 			}()
 
 			go func() {
-				if err := r.WithSink(sw).Run(ctx); err != nil {
+				if err := runRunner(ctx, r.WithSink(sw)); err != nil {
 					log.Errorf("Runner stopped: %v", err)
 				}
 				localui.QuitApp()

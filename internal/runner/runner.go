@@ -40,6 +40,10 @@ type StatusSink interface {
 // are required before marking the runner as disconnected from the platform.
 const apiFailureThreshold = 2
 
+// ErrRegistrationRevoked is returned when the server no longer accepts this
+// runner's credentials (e.g. runner deleted in the admin UI).
+var ErrRegistrationRevoked = errors.New("runner registration revoked on server")
+
 type Runner struct {
 	cfg         *config.Config
 	client      *api.Client
@@ -54,6 +58,9 @@ type Runner struct {
 	connMu       sync.Mutex
 	apiReachable bool
 	apiFailures  int
+
+	onRevoked   func()
+	revokedOnce sync.Once
 }
 
 func New(cfg *config.Config) *Runner {
@@ -80,6 +87,29 @@ func New(cfg *config.Config) *Runner {
 func (r *Runner) WithSink(sink StatusSink) *Runner {
 	r.sinks = append(r.sinks, sink)
 	return r
+}
+
+// WithOnRegistrationRevoked registers a one-shot callback when the server
+// rejects this runner's token (deleted/unregistered). Typically clears local
+// credentials and relaunches the setup flow.
+func (r *Runner) WithOnRegistrationRevoked(fn func()) *Runner {
+	r.onRevoked = fn
+	return r
+}
+
+func (r *Runner) handleAuthRevoked(err error) error {
+	if err == nil || !api.IsAuthRevoked(err) {
+		return nil
+	}
+	var returnErr error
+	r.revokedOnce.Do(func() {
+		log.Warn("[runner] runner was removed or token revoked on the server — clearing local configuration")
+		if r.onRevoked != nil {
+			r.onRevoked()
+		}
+		returnErr = ErrRegistrationRevoked
+	})
+	return returnErr
 }
 
 func (r *Runner) notify(fn func(StatusSink)) {
@@ -138,6 +168,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Response includes org_id — use it to namespace the script library and
 	// set X-Org-Id on all future requests for fast tenant routing.
 	orgID, err := r.client.SendHeartbeat("idle", RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
+	if revoked := r.handleAuthRevoked(err); revoked != nil {
+		return revoked
+	}
 	if err != nil {
 		log.Warnf("[runner] initial heartbeat failed: %v", err)
 		r.recordAPIFailure()
@@ -161,6 +194,11 @@ func (r *Runner) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-pollTicker.C:
 			job, _, err := r.client.PollNextJob()
+			if revoked := r.handleAuthRevoked(err); revoked != nil {
+				wg.Wait()
+				r.notify(func(s StatusSink) { s.SetConnected(false) })
+				return revoked
+			}
 			if err != nil {
 				log.Warnf("[runner] poll error: %v", err)
 				r.recordAPIFailure()
@@ -499,6 +537,9 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 				return false // stop after first
 			})
 			orgID, err := r.client.SendHeartbeat(status, RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
+			if revoked := r.handleAuthRevoked(err); revoked != nil {
+				return
+			}
 			if err != nil {
 				log.Warnf("[runner] heartbeat failed: %v", err)
 				r.recordAPIFailure()
