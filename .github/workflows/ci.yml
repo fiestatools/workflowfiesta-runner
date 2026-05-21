@@ -6,6 +6,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install system dependencies (required by Fyne GUI)
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -16,4 +28,4 @@ jobs:
       - name: Install system dependencies (required by Fyne GUI)
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev
       - run: go build ./...
-      - run: go test ./...
+      - run: go test -race ./...

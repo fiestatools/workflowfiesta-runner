@@ -43,7 +43,7 @@ func TestSanitizeJobName_LowercasesInput(t *testing.T) {
 func TestSanitizeJobName_ReplacesNonAlphaNum(t *testing.T) {
 	got := executor.SanitizeJobName("hello_world/test")
 	for _, ch := range got {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-') {
+		if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
 			t.Errorf("sanitizeJobName produced illegal character %q in %q", ch, got)
 		}
 	}
@@ -186,7 +186,7 @@ func TestKubernetes_EnvVars_ArePropagatedToContainer(t *testing.T) {
 // ── Fake client: waitForPod via watch ─────────────────────────────────────────
 
 func TestKubernetes_WaitForPod_SucceedsWhenPodRunning(t *testing.T) {
-	fakeClient := fakek8s.NewSimpleClientset()
+	fakeClient := fakek8s.NewClientset()
 
 	// Set up a watcher that emits a Running pod event.
 	fakeWatcher := watch.NewFake()
@@ -221,7 +221,7 @@ func TestKubernetes_WaitForPod_SucceedsWhenPodRunning(t *testing.T) {
 }
 
 func TestKubernetes_WaitForPod_SucceedsWhenPodSucceeded(t *testing.T) {
-	fakeClient := fakek8s.NewSimpleClientset()
+	fakeClient := fakek8s.NewClientset()
 	fakeWatcher := watch.NewFake()
 	fakeClient.PrependWatchReactor("pods", func(action k8stesting.Action) (bool, watch.Interface, error) {
 		return true, fakeWatcher, nil
@@ -248,7 +248,7 @@ func TestKubernetes_WaitForPod_SucceedsWhenPodSucceeded(t *testing.T) {
 }
 
 func TestKubernetes_WaitForPod_TimesOutWhenContextCancelled(t *testing.T) {
-	fakeClient := fakek8s.NewSimpleClientset()
+	fakeClient := fakek8s.NewClientset()
 	fakeWatcher := watch.NewFake()
 	fakeClient.PrependWatchReactor("pods", func(action k8stesting.Action) (bool, watch.Interface, error) {
 		return true, fakeWatcher, nil
@@ -283,7 +283,7 @@ func TestKubernetes_GetPodExitCode_ReturnsTerminatedCode(t *testing.T) {
 		},
 	}
 
-	fakeClient := fakek8s.NewSimpleClientset(pod)
+	fakeClient := fakek8s.NewClientset(pod)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -310,7 +310,7 @@ func TestKubernetes_GetPodExitCode_ReturnsZeroForSuccess(t *testing.T) {
 			},
 		},
 	}
-	fakeClient := fakek8s.NewSimpleClientset(pod)
+	fakeClient := fakek8s.NewClientset(pod)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -325,7 +325,7 @@ func TestKubernetes_GetPodExitCode_ReturnsZeroForSuccess(t *testing.T) {
 }
 
 func TestKubernetes_GetPodExitCode_ErrorWhenPodMissing(t *testing.T) {
-	fakeClient := fakek8s.NewSimpleClientset() // no objects
+	fakeClient := fakek8s.NewClientset() // no objects
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -340,7 +340,7 @@ func TestKubernetes_GetPodExitCode_ErrorWhenPodMissing(t *testing.T) {
 
 func TestKubernetes_JobDeletion_CallsDeleteWithForeground(t *testing.T) {
 	deleteCalled := false
-	fakeClient := fakek8s.NewSimpleClientset()
+	fakeClient := fakek8s.NewClientset()
 	fakeClient.PrependReactor("delete", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		deleteCalled = true
 		return true, nil, nil

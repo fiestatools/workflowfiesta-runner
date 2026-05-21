@@ -82,11 +82,12 @@ func Load() *Config {
 	// Determine executor type: explicit override, k8s auto-detect, Windows default, or docker.
 	executorType := os.Getenv("CONTAINER_RUNTIME")
 	if executorType == "" {
-		if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		switch {
+		case os.Getenv("KUBERNETES_SERVICE_HOST") != "":
 			executorType = "kubernetes"
-		} else if runtime.GOOS == "windows" {
+		case runtime.GOOS == "windows":
 			executorType = "local"
-		} else {
+		default:
 			executorType = "docker"
 		}
 	}

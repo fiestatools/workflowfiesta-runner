@@ -109,7 +109,7 @@ func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, err
 	// Clean up job when done
 	propagation := metav1.DeletePropagationForeground
 	defer func() {
-		client.BatchV1().Jobs(namespace).Delete(context.Background(), jobName, metav1.DeleteOptions{
+		_ = client.BatchV1().Jobs(namespace).Delete(context.Background(), jobName, metav1.DeleteOptions{
 			PropagationPolicy: &propagation,
 		})
 	}()

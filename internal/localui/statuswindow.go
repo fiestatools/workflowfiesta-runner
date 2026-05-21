@@ -24,16 +24,16 @@ import (
 // ── design tokens ─────────────────────────────────────────────────────────────
 
 var (
-	colorSurface   = color.NRGBA{R: 15, G: 23, B: 42, A: 255}   // #0f172a slate-900
-	colorCard      = color.NRGBA{R: 30, G: 41, B: 59, A: 255}   // #1e293b slate-800
-	colorBorder    = color.NRGBA{R: 51, G: 65, B: 85, A: 255}   // #334155 slate-700
-	colorText      = color.NRGBA{R: 248, G: 250, B: 252, A: 255} // #f8fafc
-	colorMuted     = color.NRGBA{R: 148, G: 163, B: 184, A: 255} // #94a3b8 slate-400
-	colorLabel     = color.NRGBA{R: 100, G: 116, B: 139, A: 255} // #64748b slate-500
-	colorSuccess   = color.NRGBA{R: 34, G: 197, B: 94, A: 255}  // #22c55e
-	colorAmber     = color.NRGBA{R: 245, G: 158, B: 11, A: 255} // #f59e0b
-	colorDanger    = color.NRGBA{R: 239, G: 68, B: 68, A: 255}  // #ef4444
-	colorTermBg    = color.NRGBA{R: 2, G: 8, B: 23, A: 255}     // #020817
+	colorSurface = color.NRGBA{R: 15, G: 23, B: 42, A: 255}    // #0f172a slate-900
+	colorCard    = color.NRGBA{R: 30, G: 41, B: 59, A: 255}    // #1e293b slate-800
+	colorBorder  = color.NRGBA{R: 51, G: 65, B: 85, A: 255}    // #334155 slate-700
+	colorText    = color.NRGBA{R: 248, G: 250, B: 252, A: 255} // #f8fafc
+	colorMuted   = color.NRGBA{R: 148, G: 163, B: 184, A: 255} // #94a3b8 slate-400
+	colorLabel   = color.NRGBA{R: 100, G: 116, B: 139, A: 255} // #64748b slate-500
+	colorSuccess = color.NRGBA{R: 34, G: 197, B: 94, A: 255}   // #22c55e
+	colorAmber   = color.NRGBA{R: 245, G: 158, B: 11, A: 255}  // #f59e0b
+	colorDanger  = color.NRGBA{R: 239, G: 68, B: 68, A: 255}   // #ef4444
+	colorTermBg  = color.NRGBA{R: 2, G: 8, B: 23, A: 255}      // #020817
 
 	colorSuccessDim = color.NRGBA{R: 34, G: 197, B: 94, A: 30}
 	colorAmberDim   = color.NRGBA{R: 245, G: 158, B: 11, A: 30}
@@ -93,11 +93,11 @@ type StatusWindow struct {
 	statUptime  *canvas.Text
 
 	// Active jobs section (shown only when at least one job is running)
-	jobCardOuter *fyne.Container
+	jobCardOuter  *fyne.Container
 	activeJobsBox *fyne.Container
 
 	// CTA banner
-	ctaBanner *fyne.Container
+	ctaBanner        *fyne.Container
 	stopAgentBtn     *cursorButton
 	stopAgentHandler func(string) error
 	activeJobID      string
@@ -387,8 +387,8 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 }
 
 func (sw *StatusWindow) buildCTABanner() fyne.CanvasObject {
-	colorCTABg     := color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 255} // brand orange
-	colorCTABgDim  := color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 25}
+	colorCTABg := color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 255} // brand orange
+	colorCTABgDim := color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 25}
 	colorCTABorder := color.NRGBA{R: 0xF3, G: 0x61, B: 0x0C, A: 80}
 
 	// Icon — lightning bolt indicator

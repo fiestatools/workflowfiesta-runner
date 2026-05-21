@@ -464,7 +464,7 @@ var runLocalCmd = &cobra.Command{
 			sw,
 			localCfg,
 			func(updated *localconfig.LocalConfig) {
-			cfg.LocalConfig = updated
+				cfg.LocalConfig = updated
 			},
 		) // Blocks until app.Quit().
 		return nil

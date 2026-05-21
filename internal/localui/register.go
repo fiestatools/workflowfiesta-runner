@@ -816,10 +816,11 @@ func writeCredentials(credPath string, r *RegistrationResult) error {
 }
 
 // frontendURLFrom maps an API URL to its frontend counterpart:
-//   api.workflowfiesta.com         → app.workflowfiesta.com
-//   staging.api.workflowfiesta.com → staging.app.workflowfiesta.com
-//   app.workflowfiesta.com         → app.workflowfiesta.com  (unchanged)
-//   localhost:5000                 → localhost:3000
+//
+//	api.workflowfiesta.com         → app.workflowfiesta.com
+//	staging.api.workflowfiesta.com → staging.app.workflowfiesta.com
+//	app.workflowfiesta.com         → app.workflowfiesta.com  (unchanged)
+//	localhost:5000                 → localhost:3000
 func frontendURLFrom(apiURL string) string {
 	s := strings.TrimRight(apiURL, "/")
 	parsed, err := url.Parse(s)

@@ -73,7 +73,7 @@ func EnsureWorktree(repoURL, ref, runID string) (string, error) {
 func RemoveWorktree(cacheDir, wtPath string) {
 	exec.Command("git", "-C", cacheDir, "worktree", "remove", "--force", wtPath).Run() //nolint:errcheck
 	exec.Command("git", "-C", cacheDir, "worktree", "prune").Run()                     //nolint:errcheck
-	os.RemoveAll(wtPath)                                                                //nolint:errcheck
+	os.RemoveAll(wtPath)                                                               //nolint:errcheck
 }
 
 // CleanupWorktree is called after a job completes to remove the worktree.

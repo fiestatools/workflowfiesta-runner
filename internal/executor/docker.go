@@ -33,7 +33,7 @@ func (d *dockerExecutor) Execute(ctx context.Context, input Input) (int, error) 
 	if err != nil {
 		return -1, fmt.Errorf("image pull: %w", err)
 	}
-	io.Copy(io.Discard, reader)
+	_, _ = io.Copy(io.Discard, reader)
 	reader.Close()
 
 	// Build env
@@ -61,9 +61,10 @@ func (d *dockerExecutor) Execute(ctx context.Context, input Input) (int, error) 
 		return -1, fmt.Errorf("container create: %w", err)
 	}
 
-	defer cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
+	defer func() { _ = cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true}) }()
 
-	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	err = cli.ContainerStart(ctx, resp.ID, container.StartOptions{})
+	if err != nil {
 		return -1, fmt.Errorf("container start: %w", err)
 	}
 
@@ -113,7 +114,7 @@ func (d *dockerExecutor) Execute(ctx context.Context, input Input) (int, error) 
 	case err := <-errCh:
 		execErr = fmt.Errorf("container wait: %w", err)
 	case <-timeoutCtx.Done():
-		cli.ContainerStop(context.Background(), resp.ID, container.StopOptions{})
+		_ = cli.ContainerStop(context.Background(), resp.ID, container.StopOptions{})
 		execErr = fmt.Errorf("timeout after %v", input.Timeout)
 	}
 

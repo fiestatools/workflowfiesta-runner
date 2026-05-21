@@ -76,8 +76,8 @@ type recordingSink struct {
 	logs         []string
 }
 
-func (r *recordingSink) SetConnecting()    {}
-func (r *recordingSink) SetReconnecting()  {}
+func (r *recordingSink) SetConnecting()   {}
+func (r *recordingSink) SetReconnecting() {}
 func (r *recordingSink) SetConnected(connected bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -103,7 +103,6 @@ func (r *recordingSink) AppendLog(line string) {
 	defer r.mu.Unlock()
 	r.logs = append(r.logs, line)
 }
-
 
 // ── Mock executor ─────────────────────────────────────────────────────────────
 
