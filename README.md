@@ -52,8 +52,28 @@ Requires Go 1.25+.
 ```sh
 git clone https://github.com/testfiesta/workflowfiesta-runner
 cd workflowfiesta-runner
-go build -o workflowfiesta-runner ./cmd/runner
+make build
 ```
+
+## Development
+
+A `Makefile` is provided for all common development tasks:
+
+```sh
+make help                  # Show all available targets
+make build                 # Build headless binary (default)
+make build-gui             # Build GUI binary (requires CGO)
+make test                  # Run all tests
+make test-race             # Run tests with race detector
+make test-cover            # Run tests with coverage report
+make lint                  # Run golangci-lint
+make check                 # fmt + vet + tests (pre-commit)
+make docker                # Build Docker image
+make build-all             # Cross-compile all headless variants
+make clean                 # Remove build artifacts
+```
+
+Version is automatically embedded from git tags. Override with `make build VERSION=v1.2.3`.
 
 ## Registration
 

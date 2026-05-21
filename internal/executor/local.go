@@ -163,7 +163,7 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 			if saveErr := localconfig.Save(e.localCfg, localconfig.DefaultPath()); saveErr != nil {
 				log.Warnf("[local] failed to save always-allow config: %v", saveErr)
 			}
-		// ApprovalAllow falls through to execution
+			// ApprovalAllow falls through to execution
 		}
 	}
 

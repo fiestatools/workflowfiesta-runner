@@ -22,7 +22,7 @@ type approvalState struct {
 	allowSessionBtn *cursorButton
 	alwaysAllowBtn  *cursorButton
 	denyBtn         *cursorButton
-	stopTick func()
+	stopTick        func()
 }
 
 // footerButtons returns action buttons in left-to-right visual order for Tab / arrows.
@@ -241,7 +241,7 @@ func (s *approvalState) moveFooterFocus(c fyne.Canvas, delta int) {
 				}
 			}
 		}
-		idx = ((idx + delta) % n + n) % n
+		idx = ((idx+delta)%n + n) % n
 		c.Focus(buttons[idx])
 	})
 }

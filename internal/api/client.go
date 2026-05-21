@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"workflowfiesta-runner/internal/httputil"
 	"workflowfiesta-runner/internal/platform"
 )
 
@@ -79,8 +81,24 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 	return c.httpClient.Do(req)
 }
 
+func (c *Client) retryConfig(method, path string) httputil.RetryConfig {
+	cfg := httputil.DefaultConfig()
+	cfg.OnRetry = func(attempt int, delay time.Duration, err error) {
+		log.Debugf("[api] retrying %s %s (attempt %d, backoff %v): %v",
+			method, path, attempt+1, delay, err)
+	}
+	return cfg
+}
+
+func (c *Client) doWithRetry(method, path string, body interface{}) (*http.Response, error) {
+	cfg := c.retryConfig(method, path)
+	return httputil.Do(context.Background(), cfg, func() (*http.Response, error) {
+		return c.do(method, path, body)
+	})
+}
+
 func (c *Client) post(path string, body interface{}) error {
-	resp, err := c.do("POST", path, body)
+	resp, err := c.doWithRetry("POST", path, body)
 	if err != nil {
 		return err
 	}
@@ -95,7 +113,7 @@ func (c *Client) post(path string, body interface{}) error {
 // On success with no work, returns nil, 204, nil.
 // httpStatus is 0 when err is non-nil before any response (e.g. connection error).
 func (c *Client) PollNextJob() (*Job, int, error) {
-	resp, err := c.do("GET", "/api/runner/jobs/next", nil)
+	resp, err := c.doWithRetry("GET", "/api/runner/jobs/next", nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -129,7 +147,7 @@ func (c *Client) PollNextJob() (*Job, int, error) {
 // advertises supported capabilities, and identifies the runner's OS/arch/version.
 // Returns the runner's org_id from the server.
 func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarch, version string) (string, error) {
-	resp, err := c.do("POST", "/api/runner/heartbeat", map[string]interface{}{
+	resp, err := c.doWithRetry("POST", "/api/runner/heartbeat", map[string]interface{}{
 		"status":        status,
 		"capabilities":  capabilities,
 		"os":            goos,
@@ -165,12 +183,12 @@ func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarc
 
 // StreamOutput sends a streaming output chunk to the API for broadcast to the UI.
 func (c *Client) StreamOutput(jobID, chunk string) error {
-	return c.post("/api/runner/jobs/"+jobID+"/output", map[string]string{"chunk": chunk})
+	return c.post(fmt.Sprintf("/api/runner/jobs/%s/output", jobID), map[string]string{"chunk": chunk})
 }
 
 // ReportJobComplete marks the job completed.
 func (c *Client) ReportJobComplete(jobID string, exitCode int, output string) error {
-	return c.post("/api/runner/jobs/"+jobID+"/complete", map[string]interface{}{
+	return c.post(fmt.Sprintf("/api/runner/jobs/%s/complete", jobID), map[string]interface{}{
 		"exitCode": exitCode,
 		"output":   output,
 	})
@@ -178,34 +196,34 @@ func (c *Client) ReportJobComplete(jobID string, exitCode int, output string) er
 
 // ReportJobFailed marks the job failed.
 func (c *Client) ReportJobFailed(jobID, errMsg string) error {
-	return c.post("/api/runner/jobs/"+jobID+"/fail", map[string]string{"error": errMsg})
+	return c.post(fmt.Sprintf("/api/runner/jobs/%s/fail", jobID), map[string]string{"error": errMsg})
 }
 
 // DeleteRunner resets/unregisters the runner on the server.
 // Route: POST /api/runner/:id/reset
 func (c *Client) DeleteRunner(runnerID string) error {
-	return c.post("/api/runner/"+runnerID+"/reset", nil)
+	return c.post(fmt.Sprintf("/api/runner/%s/reset", runnerID), nil)
 }
 
 // RequestAgentCancel asks the platform to stop a running job for this runner
 // without tearing down the runner process (POST /api/runner/jobs/:id/cancel).
 func (c *Client) RequestAgentCancel(jobID string) error {
-	return c.post("/api/runner/jobs/"+jobID+"/cancel", nil)
+	return c.post(fmt.Sprintf("/api/runner/jobs/%s/cancel", jobID), nil)
 }
 
 // ReportWorktreePath reports the local worktree path for a job to the server.
 func (c *Client) ReportWorktreePath(jobID, worktreePath string) error {
-	return c.post("/api/runner/jobs/"+jobID+"/worktree", map[string]string{"worktree_path": worktreePath})
+	return c.post(fmt.Sprintf("/api/runner/jobs/%s/worktree", jobID), map[string]string{"worktree_path": worktreePath})
 }
 
 // ReportApprovalPending notifies the UI that a script is awaiting approval.
 func (c *Client) ReportApprovalPending(jobID, runnerName string) error {
-	return c.post("/api/runner/jobs/"+jobID+"/approval-pending", map[string]string{"runnerName": runnerName})
+	return c.post(fmt.Sprintf("/api/runner/jobs/%s/approval-pending", jobID), map[string]string{"runnerName": runnerName})
 }
 
 // ReportApprovalResolved notifies the UI that approval was resolved.
 func (c *Client) ReportApprovalResolved(jobID string, approved bool) error {
-	return c.post("/api/runner/jobs/"+jobID+"/approval-resolved", map[string]interface{}{"approved": approved})
+	return c.post(fmt.Sprintf("/api/runner/jobs/%s/approval-resolved", jobID), map[string]interface{}{"approved": approved})
 }
 
 // ScriptMeta holds metadata returned from the server script library.
@@ -218,7 +236,7 @@ type ScriptMeta struct {
 
 // ListServerScripts fetches the org's script library metadata from the server.
 func (c *Client) ListServerScripts() ([]ScriptMeta, error) {
-	resp, err := c.do("GET", "/api/runner/scripts", nil)
+	resp, err := c.doWithRetry("GET", "/api/runner/scripts", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +267,7 @@ func (c *Client) PushScript(name, content, description string, tags []string) er
 
 // GetScript fetches the full content of a named script from the server library.
 func (c *Client) GetScript(name string) (content string, err error) {
-	resp, err := c.do("GET", "/api/runner/scripts/"+name, nil)
+	resp, err := c.doWithRetry("GET", fmt.Sprintf("/api/runner/scripts/%s", name), nil)
 	if err != nil {
 		return "", err
 	}

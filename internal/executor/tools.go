@@ -254,11 +254,11 @@ func (h *ToolHandler) autoIndexScript(path, content string) {
 		return
 	}
 	meta := map[string]interface{}{
-		"name":        name,
-		"path":        path,
-		"description": desc,
+		"name":         name,
+		"path":         path,
+		"description":  desc,
 		"auto_indexed": true,
-		"created":     time.Now().UTC().Format(time.RFC3339),
+		"created":      time.Now().UTC().Format(time.RFC3339),
 	}
 	metaPath := filepath.Join(libDir, name+".meta.json")
 	data, _ := json.MarshalIndent(meta, "", "  ")
@@ -819,7 +819,6 @@ func applyPagination(output string, offset, limit int) string {
 	}
 	return result
 }
-
 
 // ── Script Library ────────────────────────────────────────────────────────────
 

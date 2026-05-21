@@ -26,4 +26,3 @@ func Shell() string {
 	}
 	return os.Getenv("SHELL")
 }
-

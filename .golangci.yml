@@ -1,0 +1,61 @@
+# See: https://golangci-lint.run/docs/configuration/file/
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - nolocalui
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - govet         # Reports suspicious constructs
+    - staticcheck   # Advanced static analysis
+    - unused        # Find unused code
+    - gosimple      # Simplify code
+    - ineffassign   # Detect ineffectual assignments
+    - gocritic      # Opinionated linter with useful checks
+    - nilerr        # Find code returning nil error after checking err != nil
+    - errorlint     # Find issues with error wrapping
+    - bodyclose     # Detect unclosed HTTP response bodies
+    - durationcheck # Detect bad time.Duration multiplications
+    - misspell      # Fix English misspellings
+    - prealloc      # Find slice preallocation opportunities
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam  # We pass structs by value intentionally (executor.Input)
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # Too noisy for minimal gain
+  exclusions:
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      # Test files can have longer functions and more relaxed style
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gocritic
+      # Export test files are intentionally minimal
+      - path: export_test\.go
+        linters:
+          - unused
+      # main.go contains CLI display code with justified complexity
+      - path: cmd/runner/main\.go
+        linters:
+          - gocritic
+        text: "sloppyLen"
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5
