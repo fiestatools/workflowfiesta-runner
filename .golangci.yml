@@ -10,9 +10,8 @@ linters:
   enable:
     - errcheck      # Check for unchecked errors
     - govet         # Reports suspicious constructs
-    - staticcheck   # Advanced static analysis
+    - staticcheck   # Advanced static analysis (includes gosimple)
     - unused        # Find unused code
-    - gosimple      # Simplify code
     - ineffassign   # Detect ineffectual assignments
     - gocritic      # Opinionated linter with useful checks
     - nilerr        # Find code returning nil error after checking err != nil
