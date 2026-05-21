@@ -115,6 +115,7 @@ func (c *Client) PollNextJob() (*Job, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	defer resp.Body.Close()
 	status := resp.StatusCode
 	if status == 204 {
 		return nil, 204, nil // no pending job
