@@ -29,9 +29,9 @@ func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave 
 	// ── Execution section ─────────────────────────────────────────────────────
 	confirmOptions := []string{"Always ask", "Risky operations only", "Never ask"}
 	confirmMap := map[string]string{
-		"Always ask":          "always",
+		"Always ask":            "always",
 		"Risky operations only": "destructive",
-		"Never ask":           "never",
+		"Never ask":             "never",
 	}
 	confirmRevMap := map[string]string{
 		"always":      "Always ask",

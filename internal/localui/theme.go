@@ -21,6 +21,6 @@ func (t wfTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
 	return t.base.Color(n, v)
 }
 
-func (t wfTheme) Font(s fyne.TextStyle) fyne.Resource  { return t.base.Font(s) }
+func (t wfTheme) Font(s fyne.TextStyle) fyne.Resource     { return t.base.Font(s) }
 func (t wfTheme) Icon(n fyne.ThemeIconName) fyne.Resource { return t.base.Icon(n) }
-func (t wfTheme) Size(n fyne.ThemeSizeName) float32    { return t.base.Size(n) }
+func (t wfTheme) Size(n fyne.ThemeSizeName) float32       { return t.base.Size(n) }

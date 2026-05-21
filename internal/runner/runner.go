@@ -48,8 +48,8 @@ type Runner struct {
 	sinks       []StatusSink
 	activeJobs  sync.Map // jobID -> struct{}: deduplicates concurrent polls
 	// jobCancels holds per-job cancel funcs for bash/script jobs (tool jobs are not registered).
-	jobCancels  sync.Map // jobID -> context.CancelFunc
-	semaphore   chan struct{} // limits concurrent job executions
+	jobCancels sync.Map      // jobID -> context.CancelFunc
+	semaphore  chan struct{} // limits concurrent job executions
 
 	connMu       sync.Mutex
 	apiReachable bool
@@ -172,7 +172,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 
 			if _, loaded := r.activeJobs.LoadOrStore(job.JobID, struct{}{}); loaded {
-				log.Infof("[runner] skipping already-running job %s", job.JobID)
+				log.WithField("job_id", job.JobID).Info("skipping already-running job")
 				continue
 			}
 
@@ -207,6 +207,8 @@ func scriptBlurb(script string) string {
 }
 
 func (r *Runner) handleJob(ctx context.Context, job api.Job) {
+	jlog := log.WithField("job_id", job.JobID)
+
 	// ── run_local_script: expand from library, then run through security-gated executor ──
 	if job.ToolName == "run_local_script" {
 		r.handleRunLocalScript(ctx, job)
@@ -221,7 +223,7 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	}
 
 	// ── Standard bash script execution ───────────────────────────────────────
-	log.Infof("[runner] starting job %s (image: %s)", job.JobID, job.DockerImage)
+	jlog.WithField("image", job.DockerImage).Info("starting bash job")
 
 	blurb := scriptBlurb(job.Script)
 	r.notify(func(s StatusSink) { s.SetJobRunning(job.JobID, job.DockerImage, blurb) })
@@ -239,9 +241,9 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	if job.GitRepoURL != "" {
 		wtPath, wtErr := EnsureWorktree(job.GitRepoURL, job.GitRef, job.JobID)
 		if wtErr != nil {
-			log.Errorf("[runner] worktree setup for bash job %s failed: %v", job.JobID, wtErr)
+			jlog.WithError(wtErr).Error("worktree setup failed")
 			if reportErr := r.client.ReportJobFailed(job.JobID, "worktree setup: "+wtErr.Error()); reportErr != nil {
-				log.Warnf("[runner] report-fail error: %v", reportErr)
+				jlog.WithError(reportErr).Warn("report-fail error")
 			}
 			r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, 1) })
 			r.notify(func(s StatusSink) { s.SetIdle() })
@@ -249,7 +251,7 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		}
 		defer CleanupWorktree(job.GitRepoURL, job.JobID)
 		if reportErr := r.client.ReportWorktreePath(job.JobID, wtPath); reportErr != nil {
-			log.Warnf("[runner] report worktree path: %v", reportErr)
+			jlog.WithError(reportErr).Warn("report worktree path error")
 		}
 		bashWorkDir = wtPath
 	}
@@ -260,7 +262,7 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 		for chunk := range outputChan {
 			outputBuilder.WriteString(chunk)
 			if err := r.client.StreamOutput(job.JobID, chunk); err != nil {
-				log.Warnf("[runner] stream output error: %v", err)
+				jlog.WithError(err).Warn("stream output error")
 			}
 			r.notify(func(s StatusSink) { s.AppendLog(chunk) })
 		}
@@ -287,14 +289,14 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			log.Infof("[runner] job %s cancelled locally", job.JobID)
+			jlog.Info("job cancelled locally")
 			if reportErr := r.client.ReportJobFailed(job.JobID, "cancelled from runner (stop agent)"); reportErr != nil {
-				log.Warnf("[runner] report-fail error: %v", reportErr)
+				jlog.WithError(reportErr).Warn("report-fail error")
 			}
 		} else {
-			log.Errorf("[runner] job %s failed: %v", job.JobID, err)
+			jlog.WithError(err).Error("job execution failed")
 			if reportErr := r.client.ReportJobFailed(job.JobID, err.Error()); reportErr != nil {
-				log.Warnf("[runner] report-fail error: %v", reportErr)
+				jlog.WithError(reportErr).Warn("report-fail error")
 			}
 		}
 		r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, 1) })
@@ -310,9 +312,9 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	}
 
 	output := outputBuilder.String()
-	log.Infof("[runner] job %s completed with exit code %d", job.JobID, exitCode)
+	jlog.WithField("exit_code", exitCode).Info("job completed")
 	if reportErr := r.client.ReportJobComplete(job.JobID, exitCode, output); reportErr != nil {
-		log.Warnf("[runner] report-complete error: %v", reportErr)
+		jlog.WithError(reportErr).Warn("report-complete error")
 	}
 	r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, exitCode) })
 	r.notify(func(s StatusSink) { s.SetIdle() })
@@ -321,6 +323,8 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 // handleRunLocalScript loads a script from the local library and executes it through the
 // security-gated executor (approval gates, resource limits) so it behaves like a normal job.
 func (r *Runner) handleRunLocalScript(ctx context.Context, job api.Job) {
+	jlog := log.WithFields(log.Fields{"job_id": job.JobID, "tool": "run_local_script"})
+
 	scriptName := ""
 	if job.ToolArgs != nil {
 		if n, ok := job.ToolArgs["name"].(string); ok {
@@ -328,15 +332,16 @@ func (r *Runner) handleRunLocalScript(ctx context.Context, job api.Job) {
 		}
 	}
 	if scriptName == "" {
-		log.Errorf("[runner] run_local_script job %s: missing name argument", job.JobID)
+		jlog.Error("missing name argument")
 		_ = r.client.ReportJobFailed(job.JobID, "run_local_script: name argument is required")
 		r.notify(func(s StatusSink) { s.SetIdle() })
 		return
 	}
 
+	jlog = jlog.WithField("script", scriptName)
 	scriptContent, err := r.toolHandler.LoadLocalScript(scriptName)
 	if err != nil {
-		log.Errorf("[runner] run_local_script job %s: %v", job.JobID, err)
+		jlog.WithError(err).Error("failed to load script")
 		_ = r.client.ReportJobFailed(job.JobID, err.Error())
 		r.notify(func(s StatusSink) { s.SetIdle() })
 		return
@@ -413,16 +418,17 @@ func (r *Runner) syncServerScripts(orgID string) {
 // For run_local_script, it expands the script from the library and then routes back through
 // the security-gated executor so approval gates still apply.
 func (r *Runner) handleToolJob(job api.Job) {
-	log.Infof("[runner] native tool job %s: %s", job.JobID, job.ToolName)
+	jlog := log.WithFields(log.Fields{"job_id": job.JobID, "tool": job.ToolName})
+	jlog.Info("executing native tool")
 	r.notify(func(s StatusSink) { s.SetJobRunning(job.JobID, "", job.ToolName) })
 
 	// If the job has a git repo, create an isolated worktree and scope file tools to it.
 	if job.GitRepoURL != "" {
 		wtPath, err := EnsureWorktree(job.GitRepoURL, job.GitRef, job.JobID)
 		if err != nil {
-			log.Errorf("[runner] worktree setup for job %s failed: %v", job.JobID, err)
+			jlog.WithError(err).Error("worktree setup failed")
 			if reportErr := r.client.ReportJobFailed(job.JobID, "worktree setup: "+err.Error()); reportErr != nil {
-				log.Warnf("[runner] report-fail error: %v", reportErr)
+				jlog.WithError(reportErr).Warn("report-fail error")
 			}
 			r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, "", 1) })
 			r.notify(func(s StatusSink) { s.SetIdle() })
@@ -431,7 +437,7 @@ func (r *Runner) handleToolJob(job api.Job) {
 		defer CleanupWorktree(job.GitRepoURL, job.JobID)
 
 		if reportErr := r.client.ReportWorktreePath(job.JobID, wtPath); reportErr != nil {
-			log.Warnf("[runner] report worktree path error: %v", reportErr)
+			jlog.WithError(reportErr).Warn("report worktree path error")
 		}
 
 		r.toolHandler.SetWorktreeRoot(wtPath)
@@ -446,19 +452,19 @@ func (r *Runner) handleToolJob(job api.Job) {
 
 	result, err := r.toolHandler.Execute(job.ToolName, toolArgsRaw)
 	if err != nil {
-		log.Errorf("[runner] tool job %s (%s) error: %v", job.JobID, job.ToolName, err)
+		jlog.WithError(err).Error("tool execution failed")
 		if reportErr := r.client.ReportJobFailed(job.JobID, err.Error()); reportErr != nil {
-			log.Warnf("[runner] report-fail error: %v", reportErr)
+			jlog.WithError(reportErr).Warn("report-fail error")
 		}
 		r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, "", 1) })
 		r.notify(func(s StatusSink) { s.SetIdle() })
 		return
 	}
 
-	log.Infof("[runner] tool job %s (%s) complete", job.JobID, job.ToolName)
+	jlog.Info("tool completed successfully")
 	r.notify(func(s StatusSink) { s.AppendLog(result + "\n") })
 	if reportErr := r.client.ReportJobComplete(job.JobID, 0, result); reportErr != nil {
-		log.Warnf("[runner] report-complete error: %v", reportErr)
+		jlog.WithError(reportErr).Warn("report-complete error")
 	}
 	r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, "", 0) })
 	r.notify(func(s StatusSink) { s.SetIdle() })
