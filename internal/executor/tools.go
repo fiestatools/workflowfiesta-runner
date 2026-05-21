@@ -2,6 +2,7 @@ package executor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -106,11 +107,12 @@ func (h *ToolHandler) Execute(toolName string, toolArgsRaw json.RawMessage) (str
 // is implicitly allowed so the agent can freely read/write the checked-out repo.
 func (h *ToolHandler) resolvePath(p string) (string, error) {
 	var resolved string
-	if filepath.IsAbs(p) {
+	switch {
+	case filepath.IsAbs(p):
 		resolved = filepath.Clean(p)
-	} else if h.worktreeRoot != "" {
+	case h.worktreeRoot != "":
 		resolved = filepath.Clean(filepath.Join(h.worktreeRoot, p))
-	} else {
+	default:
 		resolved = filepath.Clean(filepath.Join(h.localCfg.WorkingDir(), p))
 	}
 
@@ -234,35 +236,6 @@ func (h *ToolHandler) writeFile(args map[string]interface{}) (string, error) {
 	}
 
 	return fmt.Sprintf("Written: %s (%s)", resolved, fmtSize(len(content))), nil
-}
-
-// autoIndexScript extracts a description from the first docstring/comment of a script
-// and saves it to the script library index — if it looks like a reusable script.
-func (h *ToolHandler) autoIndexScript(path, content string) {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext != ".sh" && ext != ".py" && ext != ".ps1" && ext != ".js" {
-		return
-	}
-	name := filepath.Base(path)
-	// Extract description from first comment block / docstring.
-	desc := extractScriptDescription(content, ext)
-	if desc == "" {
-		return
-	}
-	libDir := h.scriptLibDir()
-	if mkErr := os.MkdirAll(libDir, 0o755); mkErr != nil {
-		return
-	}
-	meta := map[string]interface{}{
-		"name":         name,
-		"path":         path,
-		"description":  desc,
-		"auto_indexed": true,
-		"created":      time.Now().UTC().Format(time.RFC3339),
-	}
-	metaPath := filepath.Join(libDir, name+".meta.json")
-	data, _ := json.MarshalIndent(meta, "", "  ")
-	_ = os.WriteFile(metaPath, data, 0o644)
 }
 
 // extractScriptDescription returns the first docstring or comment block from a script.
@@ -714,7 +687,8 @@ func (h *ToolHandler) ripgrepSearch(rgBin string, opts grepOpts) (string, error)
 	cmd := exec.Command(rgBin, cmdArgs...)
 	out, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return "No matches found", nil
 		}
 		return fmt.Sprintf("rg error: %v", err), nil

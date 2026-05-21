@@ -117,13 +117,14 @@ func (c *Client) PollNextJob() (*Job, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
 	status := resp.StatusCode
+	if status == 401 {
+		resp.Body.Close()
+		log.Fatal("[runner] authentication failed — check your token and re-register the runner")
+	}
+	defer resp.Body.Close()
 	if status == 204 {
 		return nil, 204, nil // no pending job
-	}
-	if status == 401 {
-		log.Fatal("[runner] authentication failed — check your token and re-register the runner")
 	}
 	if status >= 400 {
 		b, _ := io.ReadAll(resp.Body)

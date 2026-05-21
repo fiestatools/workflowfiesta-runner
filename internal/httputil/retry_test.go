@@ -25,8 +25,8 @@ func TestDo(t *testing.T) {
 		name      string
 		cfg       httputil.RetryConfig
 		responses []struct {
-			resp *http.Response
-			err  error
+			status int // 0 means nil response (network error)
+			err    error
 		}
 		wantAttempts int
 		wantErr      bool
@@ -35,10 +35,10 @@ func TestDo(t *testing.T) {
 			name: "success on first attempt",
 			cfg:  httputil.DefaultConfig(),
 			responses: []struct {
-				resp *http.Response
-				err  error
+				status int
+				err    error
 			}{
-				{resp: makeResp(200), err: nil},
+				{status: 200},
 			},
 			wantAttempts: 1,
 			wantErr:      false,
@@ -51,12 +51,12 @@ func TestDo(t *testing.T) {
 				MaxDelay:    5 * time.Millisecond,
 			},
 			responses: []struct {
-				resp *http.Response
-				err  error
+				status int
+				err    error
 			}{
-				{resp: nil, err: errors.New("connection refused")},
-				{resp: makeResp(503), err: nil},
-				{resp: makeResp(200), err: nil},
+				{err: errors.New("connection refused")},
+				{status: 503},
+				{status: 200},
 			},
 			wantAttempts: 3,
 			wantErr:      false,
@@ -69,12 +69,12 @@ func TestDo(t *testing.T) {
 				MaxDelay:    5 * time.Millisecond,
 			},
 			responses: []struct {
-				resp *http.Response
-				err  error
+				status int
+				err    error
 			}{
-				{resp: nil, err: errors.New("timeout")},
-				{resp: nil, err: errors.New("timeout")},
-				{resp: nil, err: errors.New("timeout")},
+				{err: errors.New("timeout")},
+				{err: errors.New("timeout")},
+				{err: errors.New("timeout")},
 			},
 			wantAttempts: 3,
 			wantErr:      true,
@@ -83,10 +83,10 @@ func TestDo(t *testing.T) {
 			name: "non-retryable error returns immediately",
 			cfg:  httputil.DefaultConfig(),
 			responses: []struct {
-				resp *http.Response
-				err  error
+				status int
+				err    error
 			}{
-				{resp: makeResp(400), err: nil},
+				{status: 400},
 			},
 			wantAttempts: 1,
 			wantErr:      false,
@@ -101,7 +101,11 @@ func TestDo(t *testing.T) {
 				if idx >= len(tt.responses) {
 					t.Fatalf("unexpected call: attempt %d", idx)
 				}
-				return tt.responses[idx].resp, tt.responses[idx].err
+				r := tt.responses[idx]
+				if r.status > 0 {
+					return makeResp(r.status), r.err
+				}
+				return nil, r.err
 			}
 
 			resp, err := httputil.Do(context.Background(), tt.cfg, fn)
@@ -115,7 +119,7 @@ func TestDo(t *testing.T) {
 			if !tt.wantErr && err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			if !tt.wantErr && resp != nil {
+			if resp != nil {
 				resp.Body.Close()
 			}
 		})
@@ -139,7 +143,10 @@ func TestDo_ContextCancellation(t *testing.T) {
 		return nil, errors.New("connection refused")
 	}
 
-	_, err := httputil.Do(ctx, cfg, fn)
+	resp, err := httputil.Do(ctx, cfg, fn)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error from cancelled context")
 	}
@@ -170,7 +177,10 @@ func TestDo_OnRetryCallback(t *testing.T) {
 		return nil, errors.New("fail")
 	}
 
-	_, _ = httputil.Do(context.Background(), cfg, fn)
+	resp, _ := httputil.Do(context.Background(), cfg, fn)
+	if resp != nil {
+		resp.Body.Close()
+	}
 
 	// 3 attempts = 2 retries (no retry after the last attempt)
 	if retryCount != 2 {
@@ -180,26 +190,31 @@ func TestDo_OnRetryCallback(t *testing.T) {
 
 func TestDefaultIsRetryable(t *testing.T) {
 	tests := []struct {
-		name string
-		resp *http.Response
-		err  error
-		want bool
+		name   string
+		status int // 0 means nil response (network error)
+		err    error
+		want   bool
 	}{
-		{"network error", nil, errors.New("dial tcp"), true},
-		{"429", makeResp(429), nil, true},
-		{"502", makeResp(502), nil, true},
-		{"503", makeResp(503), nil, true},
-		{"504", makeResp(504), nil, true},
-		{"200", makeResp(200), nil, false},
-		{"400", makeResp(400), nil, false},
-		{"401", makeResp(401), nil, false},
-		{"404", makeResp(404), nil, false},
-		{"500", makeResp(500), nil, false},
+		{"network error", 0, errors.New("dial tcp"), true},
+		{"429", 429, nil, true},
+		{"502", 502, nil, true},
+		{"503", 503, nil, true},
+		{"504", 504, nil, true},
+		{"200", 200, nil, false},
+		{"400", 400, nil, false},
+		{"401", 401, nil, false},
+		{"404", 404, nil, false},
+		{"500", 500, nil, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := httputil.DefaultIsRetryable(tt.resp, tt.err)
+			var resp *http.Response
+			if tt.status > 0 {
+				resp = makeResp(tt.status)
+				defer resp.Body.Close()
+			}
+			got := httputil.DefaultIsRetryable(resp, tt.err)
 			if got != tt.want {
 				t.Errorf("DefaultIsRetryable() = %v, want %v", got, tt.want)
 			}

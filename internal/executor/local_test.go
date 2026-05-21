@@ -564,29 +564,6 @@ func TestIsSessionAllowed_DoesNotMatchDifferentScript(t *testing.T) {
 	}
 }
 
-// ── mockReporter ──────────────────────────────────────────────────────────────
-
-type mockReporter struct {
-	pendingCalls  []string
-	resolvedCalls []struct {
-		jobID    string
-		approved bool
-	}
-}
-
-func (m *mockReporter) ReportApprovalPending(jobID, runnerName string) error {
-	m.pendingCalls = append(m.pendingCalls, jobID)
-	return nil
-}
-
-func (m *mockReporter) ReportApprovalResolved(jobID string, approved bool) error {
-	m.resolvedCalls = append(m.resolvedCalls, struct {
-		jobID    string
-		approved bool
-	}{jobID, approved})
-	return nil
-}
-
 // ── Session allow via needsConfirmation ───────────────────────────────────────
 
 func TestNeedsConfirmation_SkippedWhenSessionAllowed(t *testing.T) {

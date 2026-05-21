@@ -54,6 +54,11 @@ linters:
         linters:
           - gocritic
         text: "sloppyLen"
+      # tools.go: tool handlers intentionally return error messages as strings
+      # (not Go errors) because the tool dispatch protocol expects string results.
+      - path: internal/executor/tools\.go
+        linters:
+          - nilerr
 
 issues:
   max-issues-per-linter: 50

@@ -280,12 +280,13 @@ func (e *localExecutor) effectivePATH() string {
 func (e *localExecutor) buildEnv(jobEnvVars map[string]string) []string {
 	home := e.localCfg.WorkingDir()
 
-	env := []string{
-		"PATH=" + e.effectivePATH(),
-		"HOME=" + home,
+	env := make([]string, 0, 4+len(jobEnvVars))
+	env = append(env,
+		"PATH="+e.effectivePATH(),
+		"HOME="+home,
 		"TERM=xterm-256color",
 		"LANG=en_US.UTF-8",
-	}
+	)
 
 	// Merge job-provided env vars (may override defaults).
 	for k, v := range jobEnvVars {
@@ -319,7 +320,9 @@ func (e *localExecutor) writeAudit(entry auditEntry) {
 	}
 	defer f.Close()
 	data, _ := json.Marshal(entry)
-	f.Write(append(data, '\n'))
+	if _, writeErr := f.Write(append(data, '\n')); writeErr != nil {
+		log.Warnf("[local] audit log write: %v", writeErr)
+	}
 }
 
 // writeScriptTempFile writes script to a temporary file and returns its path.
