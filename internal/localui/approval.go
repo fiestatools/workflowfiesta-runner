@@ -46,11 +46,8 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 	win := a.NewWindow("WorkflowFiesta · Job Request")
 	win.SetFixedSize(false)
 
-	// Restore saved window size from preferences
 	prefs := a.Preferences()
-	savedW := prefs.FloatWithFallback("approval.window.width", 460)
-	savedH := prefs.FloatWithFallback("approval.window.height", 280)
-	win.Resize(fyne.NewSize(float32(savedW), float32(savedH)))
+	win.Resize(loadWindowSize(prefs, approvalWindowSizeSpec))
 
 	// ── header ──────────────────────────────────────────────────────────────
 	iconBg := canvas.NewRectangle(colorAmberDim)
@@ -205,15 +202,16 @@ func (s *approvalState) buildWindow(req ApprovalRequest, a fyne.App) fyne.Window
 				return
 			case <-sizeTicker.C:
 				fyne.Do(func() {
-					sz := win.Canvas().Size()
-					if sz.Width == resizeSaveW && sz.Height == resizeSaveH {
+					logical := logicalWindowSize(win)
+					if logical.Width == resizeSaveW && logical.Height == resizeSaveH {
 						resizeStable++
 						if resizeStable == 3 {
-							prefs.SetFloat("approval.window.width", float64(sz.Width))
-							prefs.SetFloat("approval.window.height", float64(sz.Height))
+							w, h := clampWindowSize(logical.Width, logical.Height, approvalWindowSizeSpec)
+							prefs.SetFloat(approvalWindowSizeSpec.prefW, float64(w))
+							prefs.SetFloat(approvalWindowSizeSpec.prefH, float64(h))
 						}
 					} else {
-						resizeSaveW, resizeSaveH = sz.Width, sz.Height
+						resizeSaveW, resizeSaveH = logical.Width, logical.Height
 						resizeStable = 0
 					}
 				})

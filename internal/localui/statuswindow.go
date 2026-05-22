@@ -189,35 +189,11 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	)
 
 	win.SetContent(content)
-	savedW := float32(a.Preferences().FloatWithFallback("status.window.width", 480))
-	savedH := float32(a.Preferences().FloatWithFallback("status.window.height", 580))
-	win.Resize(fyne.NewSize(savedW, savedH))
+	win.Resize(loadWindowSize(a.Preferences(), statusWindowSizeSpec))
 	win.SetFixedSize(false)
+	win.CenterOnScreen()
 
-	// Persist window size after the user manually resizes it.
-	// Poll every second; write prefs only after 3 consecutive stable readings
-	// to avoid spurious saves during content-triggered reflows.
-	go func() {
-		var prevW, prevH float32
-		var stable int
-		sizeTicker := time.NewTicker(time.Second)
-		defer sizeTicker.Stop()
-		for range sizeTicker.C {
-			fyne.Do(func() {
-				sz := win.Canvas().Size()
-				if sz.Width == prevW && sz.Height == prevH {
-					stable++
-					if stable == 3 {
-						a.Preferences().SetFloat("status.window.width", float64(sz.Width))
-						a.Preferences().SetFloat("status.window.height", float64(sz.Height))
-					}
-				} else {
-					prevW, prevH = sz.Width, sz.Height
-					stable = 0
-				}
-			})
-		}
-	}()
+	startWindowSizePersistence(a.Preferences(), win, statusWindowSizeSpec)
 
 	// Refresh uptime display every minute
 	go sw.uptimeTicker()
