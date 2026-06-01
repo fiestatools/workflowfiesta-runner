@@ -1,0 +1,106 @@
+name: Bug Report
+description: Report a bug with WorkflowFiesta Runner
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill in the details below to help us reproduce and fix the issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: Runner Version
+      description: Output of `workflowfiesta-runner --version`
+      placeholder: v1.2.3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+        - Linux (amd64)
+        - Linux (arm64)
+        - Windows (amd64)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os_version
+    attributes:
+      label: OS Version
+      description: e.g. macOS 15.1, Ubuntu 24.04, Windows 11 23H2
+      placeholder: macOS 15.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: executor
+    attributes:
+      label: Executor Type
+      description: Which executor is being used?
+      options:
+        - docker
+        - kubernetes
+        - local
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build_variant
+    attributes:
+      label: Build Variant
+      options:
+        - GUI (desktop with tray)
+        - Headless (server/CI)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened and what did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Run `workflowfiesta-runner run-local`
+        2. Submit a job that does X
+        3. Observe error Y
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any relevant log output (redact tokens/secrets)
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Additional Environment Details
+      description: |
+        Any extra context: Docker version, Kubernetes version, Go version, 
+        relevant env vars (CONTAINER_RUNTIME, etc.)
+      placeholder: |
+        Docker: 27.1.1
+        Go: 1.23.0
+        CONTAINER_RUNTIME=local
+    validations:
+      required: false

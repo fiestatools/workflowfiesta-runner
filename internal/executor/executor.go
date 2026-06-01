@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	"workflowfiesta-runner/internal/config"
 )
 
@@ -29,6 +31,7 @@ type Executor interface {
 // New returns an executor based on config.
 func New(cfg *config.Config) Executor {
 	if cfg.ExecutorType == "local" {
+		log.Infof("executor selected: local")
 		lc := cfg.LocalConfig
 		if lc != nil {
 			lc.RunnerName = cfg.Name
@@ -36,8 +39,10 @@ func New(cfg *config.Config) Executor {
 		return newLocalExecutor(lc)
 	}
 	if cfg.ExecutorType == "kubernetes" {
+		log.Infof("executor selected: kubernetes")
 		return &kubernetesExecutor{cfg: cfg}
 	}
+	log.Infof("executor selected: docker")
 	return &dockerExecutor{cfg: cfg}
 }
 
@@ -45,6 +50,7 @@ func New(cfg *config.Config) Executor {
 // to the local executor for API-side approval state reporting.
 func NewWithClient(cfg *config.Config, client ApprovalReporter) Executor {
 	if cfg.ExecutorType == "local" {
+		log.Infof("executor selected: local")
 		lc := cfg.LocalConfig
 		if lc != nil {
 			lc.RunnerName = cfg.Name
@@ -52,7 +58,9 @@ func NewWithClient(cfg *config.Config, client ApprovalReporter) Executor {
 		return NewLocal(lc, client)
 	}
 	if cfg.ExecutorType == "kubernetes" {
+		log.Infof("executor selected: kubernetes")
 		return &kubernetesExecutor{cfg: cfg}
 	}
+	log.Infof("executor selected: docker")
 	return &dockerExecutor{cfg: cfg}
 }

@@ -38,6 +38,180 @@ internal/
 
 ---
 
+## Executor System
+
+### Runner Job Dispatch Flow
+
+```mermaid
+sequenceDiagram
+    participant PL as PollLoop
+    participant API as API
+    participant SEM as Semaphore
+    participant GR as Goroutine
+    participant EX as Executor
+    participant OUT as OutputStreamer
+
+    loop Every 3 seconds
+        PL->>API: GET /jobs/pending
+        API-->>PL: job or empty
+    end
+
+    PL->>PL: Dedup check via sync.Map
+    PL->>SEM: Acquire slot
+    SEM-->>PL: Slot granted
+    PL->>GR: Launch goroutine
+
+    GR->>GR: Create jobCtx cancellable
+    GR->>GR: Store cancelFunc in sync.Map
+    GR->>GR: Create outputChan
+    GR->>OUT: Start streaming listener
+    OUT->>API: POST chunks real-time
+
+    GR->>EX: executor.Execute jobCtx Input
+    Note over EX: Runs in Docker or K8s or Local
+    EX-->>GR: exitCode and err
+
+    GR->>GR: close outputChan and wait drain
+    alt exitCode == 0
+        GR->>API: ReportJobCompleted
+    else error or non-zero exit
+        GR->>API: ReportJobFailed
+    end
+    GR->>SEM: Release slot
+    GR->>GR: Delete cancelFunc from sync.Map
+```
+
+### Executor Selection Flow
+
+```mermaid
+flowchart TD
+    A[Runner receives job] --> B{cfg.ExecutorType?}
+    B -->|"local"| C[localExecutor]
+    B -->|"kubernetes"| D[kubernetesExecutor]
+    B -->|"docker or default"| E[dockerExecutor]
+
+    C --> F[Execute on host with sandboxing]
+    D --> G[Create K8s batch/v1 Job]
+    E --> H[Run in Docker container]
+```
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class Executor {
+        &lt;&lt;interface&gt;&gt;
+        +Execute(ctx, Input) int, error
+    }
+
+    class Input {
+        +JobID string
+        +Image string
+        +Script string
+        +EnvVars map of string to string
+        +Timeout Duration
+        +OutputChan chan string
+        +WorkDir string
+    }
+
+    class dockerExecutor {
+        -cfg Config
+        +Execute(ctx, Input) int, error
+    }
+
+    class kubernetesExecutor {
+        -cfg Config
+        +Execute(ctx, Input) int, error
+    }
+
+    class localExecutor {
+        -localCfg LocalConfig
+        -apiClient ApprovalReporter
+        +Execute(ctx, Input) int, error
+        -blockedPatternCheck(script) string, bool
+        -needsConfirmation(script) bool
+        -writeAudit(entry)
+    }
+
+    Executor <|.. dockerExecutor
+    Executor <|.. kubernetesExecutor
+    Executor <|.. localExecutor
+    Executor ..> Input : uses
+```
+
+### Docker Executor Flow
+
+```mermaid
+sequenceDiagram
+    participant R as Runner
+    participant D as dockerExecutor
+    participant E as Docker Engine
+
+    R->>D: Execute ctx input
+    D->>E: NewClientWithOpts unix socket
+    D->>E: ImagePull
+    D->>E: ContainerCreate image script env limits
+    D->>E: ContainerStart
+    D->>E: ContainerLogs follow
+    loop Stream output
+        E-->>D: stdout and stderr lines
+        D-->>R: OutputChan send line
+    end
+    D->>E: ContainerWait not-running
+    E-->>D: exit code
+    D->>E: ContainerRemove force deferred
+    D-->>R: return exitCode
+```
+
+### Kubernetes Executor Flow
+
+```mermaid
+sequenceDiagram
+    participant R as Runner
+    participant K as kubernetesExecutor
+    participant API as K8s API Server
+
+    R->>K: Execute ctx input
+    K->>K: newK8sClient in-cluster or KUBECONFIG
+    K->>K: sanitizeJobName wf-random
+    K->>API: Jobs.Create namespace jobSpec
+    Note over API: backoffLimit=0 TTL=300s image script envVars
+    K->>API: waitForPod poll until scheduled
+    API-->>K: pod name
+    K->>API: streamLogs follow pod logs
+    loop Stream output
+        API-->>K: log lines
+        K-->>R: OutputChan send line
+    end
+    K->>API: Wait for Job completion
+    API-->>K: succeeded or failed
+    K-->>R: return exitCode
+```
+
+### Local Executor Flow (Security Layers)
+
+```mermaid
+flowchart TD
+    A[Execute called] --> B{Blocked pattern check}
+    B -->|Matched| C[DENY exit 1 and audit log]
+    B -->|Passed| D{Needs confirmation?}
+    D -->|Yes| E[Request approval via GUI or API]
+    E -->|Denied or Timeout| F[DENY exit 1 and audit log]
+    E -->|Approved| G[Apply resource limits]
+    D -->|No| G
+    G --> H[Apply OS sandbox]
+    H -->|macOS| I[sandbox-exec Seatbelt profile]
+    H -->|Linux| J[seccomp and namespace isolation]
+    H -->|Other| K[No sandbox]
+    I --> L[Exec script in restricted shell]
+    J --> L
+    K --> L
+    L --> M[Stream output to OutputChan]
+    M --> N[Return exit code and audit log]
+```
+
+---
+
 ## Key Decisions
 
 | Decision | Rationale |
