@@ -364,7 +364,7 @@ func (sw *StatusWindow) buildTerminal() fyne.CanvasObject {
 	sw.logEntry.Scroll = fyne.ScrollNone
 	sw.logEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	sw.logScroll = container.NewVScroll(sw.logEntry)
+	sw.logScroll = container.NewScroll(sw.logEntry)
 	sw.logScroll.SetMinSize(fyne.NewSize(0, 160))
 	sw.logScroll.OnScrolled = func(off fyne.Position) {
 		sw.suppressLogAutoScroll = !logScrollPinnedToBottom(sw.logScroll, off)
