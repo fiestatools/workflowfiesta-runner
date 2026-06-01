@@ -19,8 +19,9 @@ import (
 
 // OpenSettingsWindow opens the settings window and returns it.
 // onSave is called with the updated config when the user clicks "Save & Close".
-// onResetRunner is called when user confirms "Reset Runner".
-func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave func(*localconfig.LocalConfig), onResetRunner func() error) fyne.Window {
+// onResetRunner is called when the user confirms "Reset Runner"; deleteAuditLogs
+// is true when the user checked "Delete audit logs".
+func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave func(*localconfig.LocalConfig), onResetRunner func(deleteAuditLogs bool) error) fyne.Window {
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta Runner · Settings")
 	win.Resize(fyne.NewSize(600, 520))
@@ -172,23 +173,15 @@ func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave 
 		if onResetRunner == nil {
 			return
 		}
-		dialog.ShowConfirm(
-			"Reset Runner",
-			"This will unregister this runner from the server and clear local runner configuration.\n\nYou will need to register again. Continue?",
-			func(ok bool) {
-				if !ok {
-					return
+		ShowResetRunnerConfirm(win, func(deleteAuditLogs bool) {
+			go func() {
+				if err := onResetRunner(deleteAuditLogs); err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(fmt.Errorf("reset runner: %w", err), win)
+					})
 				}
-				go func() {
-					if err := onResetRunner(); err != nil {
-						fyne.Do(func() {
-							dialog.ShowError(fmt.Errorf("reset runner: %w", err), win)
-						})
-					}
-				}()
-			},
-			win,
-		)
+			}()
+		})
 	})
 	resetRunnerBtn.Importance = widget.DangerImportance
 

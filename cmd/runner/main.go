@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -152,19 +151,11 @@ func truncateCLI(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-// clearLocalRunnerState removes credentials and runner.yaml so the next launch
-// shows the registration flow. Does not call the server (runner may already be deleted).
-func clearLocalRunnerState(configPath string) error {
-	homeStateDir := filepath.Dir(config.CredentialsFilePath()) // ~/.workflowfiesta
-	if err := os.RemoveAll(homeStateDir); err != nil {
-		return fmt.Errorf("remove local state dir: %w", err)
+func auditLogPaths(cfg *config.Config) []string {
+	if cfg == nil || cfg.LocalConfig == nil {
+		return config.AuditLogPathsFromConfig("")
 	}
-	if configPath != "" && !strings.HasPrefix(configPath, homeStateDir+string(os.PathSeparator)) {
-		if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove custom config: %w", err)
-		}
-	}
-	return nil
+	return config.AuditLogPathsFromConfig(cfg.LocalConfig.AuditLog)
 }
 
 func relaunchRunnerApp() error {
@@ -182,10 +173,11 @@ func relaunchRunnerApp() error {
 
 // buildRegistrationRevokedHandler clears local credentials when the server
 // rejects the runner token (e.g. runner deleted in the admin UI).
-func buildRegistrationRevokedHandler(configPath string, onStop func()) func() {
+func buildRegistrationRevokedHandler(cfg *config.Config, configPath string, onStop func()) func() {
+	auditPaths := auditLogPaths(cfg)
 	return func() {
 		log.Warn("[runner] runner registration is no longer valid on the server — logging out locally")
-		if err := clearLocalRunnerState(configPath); err != nil {
+		if err := config.ClearLocalState(configPath, false, auditPaths); err != nil {
 			log.Warnf("[runner] clear local state: %v", err)
 		}
 		if onStop != nil {
@@ -199,7 +191,7 @@ func buildRegistrationRevokedHandler(configPath string, onStop func()) func() {
 }
 
 func newRunnerWithLogout(cfg *config.Config, configPath string, onStop func()) *runner.Runner {
-	return runner.New(cfg).WithOnRegistrationRevoked(buildRegistrationRevokedHandler(configPath, onStop))
+	return runner.New(cfg).WithOnRegistrationRevoked(buildRegistrationRevokedHandler(cfg, configPath, onStop))
 }
 
 func runRunner(ctx context.Context, r *runner.Runner) error {
@@ -211,8 +203,9 @@ func runRunner(ctx context.Context, r *runner.Runner) error {
 	return err
 }
 
-func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func() error {
-	return func() error {
+func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func(deleteAuditLogs bool) error {
+	auditPaths := auditLogPaths(cfg)
+	return func(deleteAuditLogs bool) error {
 		var errs []string
 
 		// Best-effort: unregister the runner on the server first.
@@ -227,7 +220,7 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 			}
 		}
 
-		if err := clearLocalRunnerState(configPath); err != nil {
+		if err := config.ClearLocalState(configPath, deleteAuditLogs, auditPaths); err != nil {
 			errs = append(errs, err.Error())
 		}
 		if err := relaunchRunnerApp(); err != nil {
