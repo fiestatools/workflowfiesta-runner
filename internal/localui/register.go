@@ -311,8 +311,8 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 
 	auditLogEntry := widget.NewEntry()
 	auditLogEntry.SetText(cfgDefaults.AuditLog)
-	auditLogEntry.SetPlaceHolder("/path/to/audit.log (leave blank to disable)")
-	auditLogHint := canvas.NewText("Append a line to this file for every script that runs.", colorMuted)
+	auditLogEntry.SetPlaceHolder("/path/to/audit/ (leave blank to disable)")
+	auditLogHint := canvas.NewText("Directory of per-runner audit logs; one line per script that runs.", colorMuted)
 	auditLogHint.TextSize = 10
 
 	blockedEntry := widget.NewMultiLineEntry()
@@ -341,7 +341,7 @@ func RunRegisterWizard(configPath string) (*RegistrationResult, error) {
 		widget.NewSeparator(),
 		makeLabeledEntryInfo("Audit Log Path", auditLogEntry, auditLogHint, win,
 			"Audit Log",
-			"Every script execution is appended to this file so you have a complete record of what ran on this machine.\n\nLeave blank to disable audit logging."),
+			"Every script execution is appended to a per-runner file inside this directory (named by runner ID), so each runner keeps its own complete record of what ran on this machine.\n\nLeave blank to disable audit logging."),
 		widget.NewSeparator(),
 		makeSectionRow("Blocked Patterns", win,
 			"Blocked Patterns",

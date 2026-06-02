@@ -305,7 +305,7 @@ func (e *localExecutor) wrapWithLimits(script string) string {
 
 // writeAudit appends a JSON audit entry to the configured audit log.
 func (e *localExecutor) writeAudit(entry auditEntry) {
-	logPath := e.localCfg.AuditLog
+	logPath := e.localCfg.AuditFilePath()
 	if logPath == "" {
 		return
 	}

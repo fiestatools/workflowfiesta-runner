@@ -151,11 +151,17 @@ func truncateCLI(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-func auditLogPaths(cfg *config.Config) []string {
-	if cfg == nil || cfg.LocalConfig == nil {
-		return config.AuditLogPathsFromConfig("")
+// auditLocations returns the directory holding per-runner audit logs and this
+// runner's own audit file within it.
+func auditLocations(cfg *config.Config) (auditDir, ownFile string) {
+	auditDir = localconfig.DefaultAuditDir()
+	if cfg != nil && cfg.LocalConfig != nil && cfg.LocalConfig.AuditLog != "" {
+		auditDir = cfg.LocalConfig.AuditLog
 	}
-	return config.AuditLogPathsFromConfig(cfg.LocalConfig.AuditLog)
+	if cfg != nil {
+		ownFile = localconfig.AuditFilePathFor(auditDir, cfg.RunnerID, cfg.Name)
+	}
+	return auditDir, ownFile
 }
 
 func relaunchRunnerApp() error {
@@ -174,10 +180,11 @@ func relaunchRunnerApp() error {
 // buildRegistrationRevokedHandler clears local credentials when the server
 // rejects the runner token (e.g. runner deleted in the admin UI).
 func buildRegistrationRevokedHandler(cfg *config.Config, configPath string, onStop func()) func() {
-	auditPaths := auditLogPaths(cfg)
+	auditDir, ownAuditFile := auditLocations(cfg)
 	return func() {
 		log.Warn("[runner] runner registration is no longer valid on the server — logging out locally")
-		if err := config.ClearLocalState(configPath, false, auditPaths); err != nil {
+		// Server-side revocation keeps this runner's audit history by default.
+		if err := config.ClearLocalState(configPath, auditDir, ownAuditFile, false); err != nil {
 			log.Warnf("[runner] clear local state: %v", err)
 		}
 		if onStop != nil {
@@ -204,7 +211,7 @@ func runRunner(ctx context.Context, r *runner.Runner) error {
 }
 
 func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func(deleteAuditLogs bool) error {
-	auditPaths := auditLogPaths(cfg)
+	auditDir, ownAuditFile := auditLocations(cfg)
 	return func(deleteAuditLogs bool) error {
 		var errs []string
 
@@ -220,7 +227,9 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 			}
 		}
 
-		if err := config.ClearLocalState(configPath, deleteAuditLogs, auditPaths); err != nil {
+		// deleteAuditLogs removes only this runner's own audit file; other
+		// runners' logs in the shared audit directory are preserved.
+		if err := config.ClearLocalState(configPath, auditDir, ownAuditFile, deleteAuditLogs); err != nil {
 			errs = append(errs, err.Error())
 		}
 		if err := relaunchRunnerApp(); err != nil {

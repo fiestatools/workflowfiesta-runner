@@ -7,56 +7,54 @@ import (
 	"strings"
 )
 
-// ClearLocalState removes persisted runner credentials and configuration.
-// When deleteAuditLogs is false, files matching preserveAuditPaths (and the
-// default ~/.workflowfiesta/audit.log) are kept; other files under
-// ~/.workflowfiesta are removed.
-func ClearLocalState(configPath string, deleteAuditLogs bool, preserveAuditPaths []string) error {
+// ClearLocalState removes persisted runner credentials and configuration while
+// preserving the per-runner audit directory (which may hold logs from other
+// runners on this machine).
+//
+// auditDir is the directory holding per-runner audit logs; it is always kept.
+// ownAuditFile is this runner's own audit log file. When deleteOwnAudit is true,
+// only that single file is removed — other runners' audit logs are left intact.
+func ClearLocalState(configPath, auditDir, ownAuditFile string, deleteOwnAudit bool) error {
 	homeStateDir := filepath.Dir(CredentialsFilePath())
-	preserve := auditPreserveSet(preserveAuditPaths)
+	preserveDir := cleanAbs(auditDir)
 
-	if deleteAuditLogs {
-		if err := os.RemoveAll(homeStateDir); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove local state dir: %w", err)
-		}
-		for p := range preserve {
-			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove audit log %s: %w", p, err)
-			}
-		}
-	} else if err := clearHomeStateExceptAudit(homeStateDir, preserve); err != nil {
+	// Remove everything under the state dir except the audit directory.
+	if err := clearHomeStateExceptDir(homeStateDir, preserveDir); err != nil {
 		return err
 	}
 
+	// Remove a custom config file that lives outside the state dir.
 	if configPath != "" && !strings.HasPrefix(configPath, homeStateDir+string(os.PathSeparator)) {
 		if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove custom config: %w", err)
 		}
 	}
+
+	// Optionally delete just this runner's own audit file.
+	if deleteOwnAudit && ownAuditFile != "" {
+		if err := os.Remove(ownAuditFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove audit log %s: %w", ownAuditFile, err)
+		}
+		removeDirIfEmpty(preserveDir)
+	}
+
 	return nil
 }
 
-func auditPreserveSet(paths []string) map[string]struct{} {
-	set := make(map[string]struct{})
-	add := func(p string) {
-		if p == "" {
-			return
-		}
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			abs = p
-		}
-		set[filepath.Clean(abs)] = struct{}{}
+// cleanAbs returns the cleaned, absolute form of p (best-effort).
+func cleanAbs(p string) string {
+	if p == "" {
+		return ""
 	}
-	for _, p := range paths {
-		add(p)
+	if abs, err := filepath.Abs(p); err == nil {
+		return filepath.Clean(abs)
 	}
-	home, _ := os.UserHomeDir()
-	add(filepath.Join(home, ".workflowfiesta", "audit.log"))
-	return set
+	return filepath.Clean(p)
 }
 
-func clearHomeStateExceptAudit(homeStateDir string, preserve map[string]struct{}) error {
+// clearHomeStateExceptDir removes every entry under homeStateDir except the
+// preserveDir (the audit directory). preserveDir may be empty (preserve nothing).
+func clearHomeStateExceptDir(homeStateDir, preserveDir string) error {
 	entries, err := os.ReadDir(homeStateDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -66,7 +64,7 @@ func clearHomeStateExceptAudit(homeStateDir string, preserve map[string]struct{}
 	}
 	for _, ent := range entries {
 		path := filepath.Join(homeStateDir, ent.Name())
-		if isPreservedAuditPath(path, preserve) {
+		if preserveDir != "" && (cleanAbs(path) == preserveDir || sameFile(path, preserveDir)) {
 			continue
 		}
 		if err := os.RemoveAll(path); err != nil {
@@ -76,18 +74,15 @@ func clearHomeStateExceptAudit(homeStateDir string, preserve map[string]struct{}
 	return nil
 }
 
-func isPreservedAuditPath(path string, preserve map[string]struct{}) bool {
-	clean := filepath.Clean(path)
-	if _, ok := preserve[clean]; ok {
-		return true
+// removeDirIfEmpty removes dir only when it contains no entries.
+func removeDirIfEmpty(dir string) {
+	if dir == "" {
+		return
 	}
-	// Symlink or equivalent path to a preserved audit file.
-	for p := range preserve {
-		if sameFile(path, p) {
-			return true
-		}
+	entries, err := os.ReadDir(dir)
+	if err == nil && len(entries) == 0 {
+		_ = os.Remove(dir)
 	}
-	return false
 }
 
 func sameFile(a, b string) bool {
@@ -102,15 +97,4 @@ func sameFile(a, b string) bool {
 		return true
 	}
 	return false
-}
-
-// AuditLogPathsFromConfig returns audit log file paths that may exist on disk.
-func AuditLogPathsFromConfig(auditLog string) []string {
-	var paths []string
-	if auditLog != "" {
-		paths = append(paths, auditLog)
-	}
-	home, _ := os.UserHomeDir()
-	paths = append(paths, filepath.Join(home, ".workflowfiesta", "audit.log"))
-	return paths
 }

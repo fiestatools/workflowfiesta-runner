@@ -222,8 +222,10 @@ func TestWrapWithLimits_MemoryLimit(t *testing.T) {
 
 func TestWriteAudit_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
-	logPath := dir + "/audit.log"
-	e := testExecutor(func(c *localconfig.LocalConfig) { c.AuditLog = logPath })
+	e := testExecutor(func(c *localconfig.LocalConfig) {
+		c.AuditLog = dir
+		c.RunnerID = "test-runner"
+	})
 
 	e.writeAudit(auditEntry{
 		Time:     "2026-03-07T00:00:00Z",
@@ -232,7 +234,7 @@ func TestWriteAudit_CreatesFile(t *testing.T) {
 		Decision: "approved",
 	})
 
-	data, err := os.ReadFile(logPath)
+	data, err := os.ReadFile(e.localCfg.AuditFilePath())
 	if err != nil {
 		t.Fatalf("audit log not created: %v", err)
 	}
@@ -243,8 +245,10 @@ func TestWriteAudit_CreatesFile(t *testing.T) {
 
 func TestWriteAudit_IsValidJSON(t *testing.T) {
 	dir := t.TempDir()
-	logPath := dir + "/audit.log"
-	e := testExecutor(func(c *localconfig.LocalConfig) { c.AuditLog = logPath })
+	e := testExecutor(func(c *localconfig.LocalConfig) {
+		c.AuditLog = dir
+		c.RunnerID = "test-runner"
+	})
 
 	e.writeAudit(auditEntry{
 		Time:     "2026-03-07T00:00:00Z",
@@ -253,7 +257,7 @@ func TestWriteAudit_IsValidJSON(t *testing.T) {
 		Reason:   `blocked_pattern:rm\s+-rf\s+/`,
 	})
 
-	data, _ := os.ReadFile(logPath)
+	data, _ := os.ReadFile(e.localCfg.AuditFilePath())
 	line := strings.TrimSpace(string(data))
 	if !strings.HasPrefix(line, "{") || !strings.HasSuffix(line, "}") {
 		t.Errorf("audit entry is not valid JSON object: %s", line)
@@ -262,8 +266,10 @@ func TestWriteAudit_IsValidJSON(t *testing.T) {
 
 func TestWriteAudit_AppendMultiple(t *testing.T) {
 	dir := t.TempDir()
-	logPath := dir + "/audit.log"
-	e := testExecutor(func(c *localconfig.LocalConfig) { c.AuditLog = logPath })
+	e := testExecutor(func(c *localconfig.LocalConfig) {
+		c.AuditLog = dir
+		c.RunnerID = "test-runner"
+	})
 
 	for i := 0; i < 3; i++ {
 		e.writeAudit(auditEntry{
@@ -273,7 +279,7 @@ func TestWriteAudit_AppendMultiple(t *testing.T) {
 		})
 	}
 
-	data, _ := os.ReadFile(logPath)
+	data, _ := os.ReadFile(e.localCfg.AuditFilePath())
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 3 {
 		t.Errorf("expected 3 audit lines, got %d:\n%s", len(lines), data)
@@ -288,11 +294,13 @@ func TestWriteAudit_EmptyPath_NoError(t *testing.T) {
 
 func TestWriteAudit_FileMode(t *testing.T) {
 	dir := t.TempDir()
-	logPath := dir + "/audit.log"
-	e := testExecutor(func(c *localconfig.LocalConfig) { c.AuditLog = logPath })
+	e := testExecutor(func(c *localconfig.LocalConfig) {
+		c.AuditLog = dir
+		c.RunnerID = "test-runner"
+	})
 	e.writeAudit(auditEntry{JobID: "x", Decision: "approved"})
 
-	info, err := os.Stat(logPath)
+	info, err := os.Stat(e.localCfg.AuditFilePath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,9 +407,9 @@ func TestExecute_ClampTimeout(t *testing.T) {
 
 func TestExecute_AuditLog_Written(t *testing.T) {
 	dir := t.TempDir()
-	logPath := dir + "/audit.log"
 	e := testExecutor(func(c *localconfig.LocalConfig) {
-		c.AuditLog = logPath
+		c.AuditLog = dir
+		c.RunnerID = "test-runner"
 		c.Confirm = "never"
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -413,7 +421,7 @@ func TestExecute_AuditLog_Written(t *testing.T) {
 		Timeout: 5 * time.Second,
 	})
 
-	data, err := os.ReadFile(logPath)
+	data, err := os.ReadFile(e.localCfg.AuditFilePath())
 	if err != nil {
 		t.Fatalf("audit log not written: %v", err)
 	}

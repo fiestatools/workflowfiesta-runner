@@ -157,7 +157,7 @@ func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave 
 	)
 
 	// ── Actions section ───────────────────────────────────────────────────────
-	openAuditBtn := newButton("Open Audit Log", func() {
+	openAuditBtn := newButton("Open Audit Folder", func() {
 		auditPath := cfg.AuditLog
 		if auditPath == "" {
 			return

@@ -35,6 +35,67 @@ type LocalConfig struct {
 	// Runtime-only fields — not persisted to YAML.
 	Headless   bool   `yaml:"-"`
 	RunnerName string `yaml:"-"`
+	RunnerID   string `yaml:"-"`
+}
+
+// DefaultAuditDir returns ~/.workflowfiesta/audit — the directory that holds
+// one audit log file per runner (named by runner ID).
+func DefaultAuditDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "audit"
+	}
+	return filepath.Join(home, ".workflowfiesta", "audit")
+}
+
+// AuditFileName returns the per-runner audit log filename for the given identity.
+// Files are keyed primarily by runner ID, appended name only for human readability.
+func AuditFileName(runnerID, runnerName string) string {
+	id := sanitizeAuditComponent(runnerID)
+	name := sanitizeAuditComponent(runnerName)
+	switch {
+	case id != "" && name != "":
+		return id + "-" + name + ".log"
+	case id != "":
+		return id + ".log"
+	case name != "":
+		return name + ".log"
+	default:
+		return "unregistered.log"
+	}
+}
+
+// sanitizeAuditComponent keeps a filename component safe across platforms.
+func sanitizeAuditComponent(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// AuditDir returns the directory holding per-runner audit logs, or "" if
+// auditing is disabled (empty audit_log config).
+func (c *LocalConfig) AuditDir() string { return c.AuditLog }
+
+// AuditFilePath returns this runner's audit log file path, or "" if auditing is
+// disabled. The path is <audit_dir>/<runner-id>.log.
+func (c *LocalConfig) AuditFilePath() string {
+	return AuditFilePathFor(c.AuditLog, c.RunnerID, c.RunnerName)
+}
+
+// AuditFilePathFor returns the audit file path for a runner identity within dir,
+// or "" when dir is empty (auditing disabled).
+func AuditFilePathFor(dir, runnerID, runnerName string) string {
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, AuditFileName(runnerID, runnerName))
 }
 
 // DefaultPath returns ~/.workflowfiesta/runner.yaml.
@@ -48,8 +109,7 @@ func DefaultPath() string {
 
 // Default returns a LocalConfig with safe, out-of-the-box defaults.
 func Default() *LocalConfig {
-	home, _ := os.UserHomeDir()
-	auditLog := filepath.Join(home, ".workflowfiesta", "audit.log")
+	auditLog := DefaultAuditDir()
 	return &LocalConfig{
 		AllowedPaths:    []string{"~/"},
 		Confirm:         "destructive",

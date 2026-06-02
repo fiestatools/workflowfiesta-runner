@@ -32,6 +32,7 @@ func New(cfg *config.Config) Executor {
 		lc := cfg.LocalConfig
 		if lc != nil {
 			lc.RunnerName = cfg.Name
+			lc.RunnerID = cfg.RunnerID
 		}
 		return newLocalExecutor(lc)
 	}
@@ -48,6 +49,7 @@ func NewWithClient(cfg *config.Config, client ApprovalReporter) Executor {
 		lc := cfg.LocalConfig
 		if lc != nil {
 			lc.RunnerName = cfg.Name
+			lc.RunnerID = cfg.RunnerID
 		}
 		return NewLocal(lc, client)
 	}
