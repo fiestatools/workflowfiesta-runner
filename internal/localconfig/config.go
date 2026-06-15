@@ -10,6 +10,48 @@ import (
 	"workflowfiesta-runner/internal/platform"
 )
 
+// NamedAuditLogPath returns the audit log path for a specific runner instance.
+// Format: ~/.workflowfiesta/audit-{name}-{id}.log
+func NamedAuditLogPath(runnerName, runnerID string) string {
+	home, _ := os.UserHomeDir()
+	filename := fmt.Sprintf("audit-%s-%s.log", sanitizeForFilename(runnerName), sanitizeForFilename(runnerID))
+	return filepath.Join(home, ".workflowfiesta", filename)
+}
+
+// sanitizeForFilename replaces characters that are invalid in filenames with dashes.
+func sanitizeForFilename(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+			b.WriteRune('-')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// UpdateAuditLogForRunner switches AuditLog to the runner-specific named path
+// when the runner name and ID are known and the path is still the generic default.
+// Returns true if changed — caller should save the config.
+func (c *LocalConfig) UpdateAuditLogForRunner(runnerName, runnerID string) bool {
+	if runnerName == "" || runnerID == "" {
+		return false
+	}
+	named := NamedAuditLogPath(runnerName, runnerID)
+	if c.AuditLog == named {
+		return false
+	}
+	home, _ := os.UserHomeDir()
+	defaultLog := filepath.Join(home, ".workflowfiesta", "audit.log")
+	if c.AuditLog != "" && filepath.Clean(c.AuditLog) != defaultLog {
+		return false // user has a custom path, don't override
+	}
+	c.AuditLog = named
+	return true
+}
+
 // LocalConfig holds the configuration for local executor mode, loaded from runner.yaml.
 type LocalConfig struct {
 	AllowedPaths          []string `yaml:"allowed_paths"`

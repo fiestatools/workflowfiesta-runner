@@ -41,7 +41,7 @@ func QuitApp() {
 // SetupTray configures the system tray icon and menu without starting the event
 // loop. Call this before a.Run() when you need to manage the loop yourself.
 // cfg and onConfigSaved are used for the Settings menu item; both may be nil.
-func SetupTray(runnerName string, onStop func(), onClearConfig func(deleteAuditLogs bool) error, sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
+func SetupTray(runnerName string, onStop func(), onClearConfig func(deleteAuditLogs, deleteScripts bool) error, sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
 	a := getApp()
 	if desk, ok := a.(desktop.App); ok {
 		var showItem *fyne.MenuItem
@@ -58,15 +58,15 @@ func SetupTray(runnerName string, onStop func(), onClearConfig func(deleteAuditL
 			if onClearConfig == nil {
 				return
 			}
-			runClear := func(deleteAuditLogs bool) {
-				if err := onClearConfig(deleteAuditLogs); err != nil {
+			runClear := func(deleteAuditLogs, deleteScripts bool) {
+				if err := onClearConfig(deleteAuditLogs, deleteScripts); err != nil {
 					if sw != nil {
 						dialog.ShowError(fmt.Errorf("reset runner: %w", err), sw.win)
 					}
 				}
 			}
 			if sw == nil {
-				runClear(false)
+				runClear(false, false)
 				return
 			}
 			ShowResetRunnerConfirm(sw.win, runClear)
@@ -100,7 +100,7 @@ func SetupTray(runnerName string, onStop func(), onClearConfig func(deleteAuditL
 // Blocks until the event loop exits. onStop is called on "Stop Runner".
 // sw is the StatusWindow to show/re-open from the tray menu; may be nil.
 // cfg and onConfigSaved are passed to the Settings menu item.
-func StartTray(runnerName string, onStop func(), onClearConfig func(deleteAuditLogs bool) error, sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
+func StartTray(runnerName string, onStop func(), onClearConfig func(deleteAuditLogs, deleteScripts bool) error, sw *StatusWindow, cfg *localconfig.LocalConfig, onConfigSaved func(*localconfig.LocalConfig)) {
 	SetupTray(runnerName, onStop, onClearConfig, sw, cfg, onConfigSaved)
 	getApp().Run()
 }

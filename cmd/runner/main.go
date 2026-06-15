@@ -151,6 +151,20 @@ func truncateCLI(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
+// applyNamedAuditLog updates localCfg.AuditLog to audit-{name}-{id}.log when
+// the runner is registered and the path is still the generic default.
+// Saves runner.yaml on change so the named path persists across restarts.
+func applyNamedAuditLog(cfg *config.Config, localCfg *localconfig.LocalConfig, configPath string) {
+	if cfg == nil || localCfg == nil {
+		return
+	}
+	if localCfg.UpdateAuditLogForRunner(cfg.Name, cfg.RunnerID) {
+		if err := localconfig.Save(localCfg, configPath); err != nil {
+			log.Warnf("[runner] update audit log path in config: %v", err)
+		}
+	}
+}
+
 func auditLogPaths(cfg *config.Config) []string {
 	if cfg == nil || cfg.LocalConfig == nil {
 		return config.AuditLogPathsFromConfig("")
@@ -177,7 +191,7 @@ func buildRegistrationRevokedHandler(cfg *config.Config, configPath string, onSt
 	auditPaths := auditLogPaths(cfg)
 	return func() {
 		log.Warn("[runner] runner registration is no longer valid on the server — logging out locally")
-		if err := config.ClearLocalState(configPath, false, auditPaths); err != nil {
+		if err := config.ClearLocalState(configPath, false, false, auditPaths); err != nil {
 			log.Warnf("[runner] clear local state: %v", err)
 		}
 		if onStop != nil {
@@ -203,9 +217,9 @@ func runRunner(ctx context.Context, r *runner.Runner) error {
 	return err
 }
 
-func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func(deleteAuditLogs bool) error {
+func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func(deleteAuditLogs, deleteScripts bool) error {
 	auditPaths := auditLogPaths(cfg)
-	return func(deleteAuditLogs bool) error {
+	return func(deleteAuditLogs, deleteScripts bool) error {
 		var errs []string
 
 		// Best-effort: unregister the runner on the server first.
@@ -220,7 +234,7 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 			}
 		}
 
-		if err := config.ClearLocalState(configPath, deleteAuditLogs, auditPaths); err != nil {
+		if err := config.ClearLocalState(configPath, deleteAuditLogs, deleteScripts, auditPaths); err != nil {
 			errs = append(errs, err.Error())
 		}
 		if err := relaunchRunnerApp(); err != nil {
@@ -401,6 +415,7 @@ var runLocalCmd = &cobra.Command{
 
 		cfg.ExecutorType = "local"
 		cfg.LocalConfig = localCfg
+		applyNamedAuditLog(cfg, localCfg, configPath)
 
 		log.Infof("Starting WorkflowFiesta runner in local mode (version %s)", version)
 		log.Infof("API URL: %s", cfg.APIURL)
@@ -546,6 +561,7 @@ func main() {
 		localui.RunAutoLaunch(localconfig.DefaultPath(), func(cfg *config.Config) *localui.StatusWindow {
 			ctx, cancel := context.WithCancel(context.Background())
 			configPath := localconfig.DefaultPath()
+			applyNamedAuditLog(cfg, cfg.LocalConfig, configPath)
 
 			r := newRunnerWithLogout(cfg, configPath, cancel)
 			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)

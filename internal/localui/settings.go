@@ -20,8 +20,8 @@ import (
 // OpenSettingsWindow opens the settings window and returns it.
 // onSave is called with the updated config when the user clicks "Save & Close".
 // onResetRunner is called when the user confirms "Reset Runner"; deleteAuditLogs
-// is true when the user checked "Delete audit logs".
-func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave func(*localconfig.LocalConfig), onResetRunner func(deleteAuditLogs bool) error) fyne.Window {
+// and deleteScripts reflect the checkboxes the user ticked.
+func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave func(*localconfig.LocalConfig), onResetRunner func(deleteAuditLogs, deleteScripts bool) error) fyne.Window {
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta Runner · Settings")
 	win.Resize(fyne.NewSize(600, 520))
@@ -173,9 +173,9 @@ func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave 
 		if onResetRunner == nil {
 			return
 		}
-		ShowResetRunnerConfirm(win, func(deleteAuditLogs bool) {
+		ShowResetRunnerConfirm(win, func(deleteAuditLogs, deleteScripts bool) {
 			go func() {
-				if err := onResetRunner(deleteAuditLogs); err != nil {
+				if err := onResetRunner(deleteAuditLogs, deleteScripts); err != nil {
 					fyne.Do(func() {
 						dialog.ShowError(fmt.Errorf("reset runner: %w", err), win)
 					})

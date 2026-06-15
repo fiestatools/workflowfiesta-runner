@@ -9,9 +9,9 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// ShowResetRunnerConfirm asks the user to confirm logout/reset and whether to
-// delete audit logs. onConfirm receives deleteAuditLogs (true = remove audit files).
-func ShowResetRunnerConfirm(parent fyne.Window, onConfirm func(deleteAuditLogs bool)) {
+// ShowResetRunnerConfirm asks the user to confirm logout/reset and which
+// optional data to delete. onConfirm receives (deleteAuditLogs, deleteScripts).
+func ShowResetRunnerConfirm(parent fyne.Window, onConfirm func(deleteAuditLogs, deleteScripts bool)) {
 	if onConfirm == nil {
 		return
 	}
@@ -25,9 +25,13 @@ func ShowResetRunnerConfirm(parent fyne.Window, onConfirm func(deleteAuditLogs b
 	deleteAuditCheck := widget.NewCheck("Delete audit logs", nil)
 	deleteAuditCheck.SetChecked(false)
 
+	deleteScriptsCheck := widget.NewCheck("Delete local script cache", nil)
+	deleteScriptsCheck.SetChecked(false)
+
 	content := container.NewVBox(
 		body,
 		deleteAuditCheck,
+		deleteScriptsCheck,
 	)
 
 	dialog.ShowCustomConfirm(
@@ -37,7 +41,7 @@ func ShowResetRunnerConfirm(parent fyne.Window, onConfirm func(deleteAuditLogs b
 		content,
 		func(ok bool) {
 			if ok {
-				onConfirm(deleteAuditCheck.Checked)
+				onConfirm(deleteAuditCheck.Checked, deleteScriptsCheck.Checked)
 			}
 		},
 		parent,
