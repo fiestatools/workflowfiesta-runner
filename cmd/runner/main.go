@@ -182,11 +182,18 @@ func relaunchRunnerApp() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("relaunch app: %w", err)
 	}
+
+	_ = cmd.Process.Release()
 	return nil
 }
 
 // buildRegistrationRevokedHandler clears local credentials when the server
 // rejects the runner token (e.g. runner deleted in the admin UI).
+// This handler intentionally swallows errors (log.Warn only) rather than
+// returning them. It fires during an automatic server-side logout where the app
+// is already shutting down — there is no UI context to surface errors to, unlike
+// buildClearConfigurationHandler which is user-initiated and returns errors for
+// display.
 func buildRegistrationRevokedHandler(cfg *config.Config, configPath string, onStop func()) func() {
 	auditPaths := auditLogPaths(cfg)
 	return func() {
@@ -220,8 +227,6 @@ func runRunner(ctx context.Context, r *runner.Runner) error {
 func buildClearConfigurationHandler(cfg *config.Config, configPath string, onStop func()) func(deleteAuditLogs, deleteScripts bool) error {
 	auditPaths := auditLogPaths(cfg)
 	return func(deleteAuditLogs, deleteScripts bool) error {
-		var errs []string
-
 		// Best-effort: unregister the runner on the server first.
 		if cfg != nil && cfg.APIURL != "" && cfg.Token != "" && cfg.RunnerID != "" {
 			client := wfapi.New(cfg.APIURL, cfg.Token)
@@ -234,15 +239,15 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 			}
 		}
 
-		if err := config.ClearLocalState(configPath, deleteAuditLogs, deleteScripts, auditPaths); err != nil {
-			errs = append(errs, err.Error())
+		var clearErr, relaunchErr error
+		if clearErr = config.ClearLocalState(configPath, deleteAuditLogs, deleteScripts, auditPaths); clearErr != nil {
+			log.Warnf("reset runner: clear local state: %v", clearErr)
 		}
-		if err := relaunchRunnerApp(); err != nil {
-			errs = append(errs, err.Error())
+		if relaunchErr = relaunchRunnerApp(); relaunchErr != nil {
+			log.Warnf("reset runner: relaunch: %v", relaunchErr)
 		}
-
-		if len(errs) > 0 {
-			return errors.New(strings.Join(errs, "; "))
+		if err := errors.Join(clearErr, relaunchErr); err != nil {
+			return err
 		}
 		if onStop != nil {
 			onStop()

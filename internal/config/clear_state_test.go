@@ -152,3 +152,79 @@ func TestClearLocalState_DeletesScriptsWhenRequested(t *testing.T) {
 		t.Fatalf("audit.log should remain: %v", err)
 	}
 }
+
+func TestClearLocalState_PreservesOtherRunnerAuditLogInDeepSubdir(t *testing.T) {
+	_, stateDir := setupStateDir(t)
+
+	thisLog := filepath.Join(stateDir, "audit-my-runner-abc123.log")
+	writeFile(t, thisLog, "this runner\n")
+
+	// Another runner's log at depth 3: a/b/c/audit-other.log
+	deepDir := filepath.Join(stateDir, "a", "b", "c")
+	if err := os.MkdirAll(deepDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	otherLog := filepath.Join(deepDir, "audit-other-runner-xyz789.log")
+	writeFile(t, otherLog, "other runner\n")
+
+	credPath := filepath.Join(stateDir, "credentials.env")
+	writeFile(t, credPath, "token=x\n")
+
+	if err := config.ClearLocalState("", true, false, []string{thisLog}); err != nil {
+		t.Fatalf("ClearLocalState: %v", err)
+	}
+	// All ancestor dirs and the log itself must survive
+	for _, p := range []string{
+		filepath.Join(stateDir, "a"),
+		filepath.Join(stateDir, "a", "b"),
+		deepDir,
+		otherLog,
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("should be preserved but missing: %s", p)
+		}
+	}
+	if _, err := os.Stat(thisLog); !os.IsNotExist(err) {
+		t.Fatal("this runner's audit log should be removed")
+	}
+	if _, err := os.Stat(credPath); !os.IsNotExist(err) {
+		t.Fatal("credentials.env should be removed")
+	}
+}
+
+func TestClearLocalState_PreservesOtherRunnerAuditLogInSubdir(t *testing.T) {
+	_, stateDir := setupStateDir(t)
+
+	// This runner's log at top level
+	thisLog := filepath.Join(stateDir, "audit-my-runner-abc123.log")
+	writeFile(t, thisLog, "this runner\n")
+
+	// Another runner's log inside a subdirectory
+	subDir := filepath.Join(stateDir, "node2")
+	if err := os.MkdirAll(subDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	otherLog := filepath.Join(subDir, "audit-other-runner-xyz789.log")
+	writeFile(t, otherLog, "other runner\n")
+
+	credPath := filepath.Join(stateDir, "credentials.env")
+	writeFile(t, credPath, "token=x\n")
+
+	if err := config.ClearLocalState("", true, false, []string{thisLog}); err != nil {
+		t.Fatalf("ClearLocalState: %v", err)
+	}
+	// subDir and the other runner's log must both survive
+	if _, err := os.Stat(subDir); err != nil {
+		t.Fatalf("subdirectory containing other runner log should be preserved: %v", err)
+	}
+	if _, err := os.Stat(otherLog); err != nil {
+		t.Fatalf("other runner's audit log in subdir should be preserved: %v", err)
+	}
+	// This runner's log and credentials should be gone
+	if _, err := os.Stat(thisLog); !os.IsNotExist(err) {
+		t.Fatal("this runner's audit log should be removed")
+	}
+	if _, err := os.Stat(credPath); !os.IsNotExist(err) {
+		t.Fatal("credentials.env should be removed")
+	}
+}

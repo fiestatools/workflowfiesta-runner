@@ -58,6 +58,7 @@ type Runner struct {
 	connMu       sync.Mutex
 	apiReachable bool
 	apiFailures  int
+	authFailures int // consecutive auth-revoked responses; must reach apiFailureThreshold before logout
 
 	onRevoked   func()
 	revokedOnce sync.Once
@@ -99,17 +100,28 @@ func (r *Runner) WithOnRegistrationRevoked(fn func()) *Runner {
 
 func (r *Runner) handleAuthRevoked(err error) error {
 	if err == nil || !api.IsAuthRevoked(err) {
+		r.connMu.Lock()
+		r.authFailures = 0
+		r.connMu.Unlock()
 		return nil
 	}
-	var returnErr error
+	r.connMu.Lock()
+	r.authFailures++
+	ready := r.authFailures >= apiFailureThreshold
+	r.connMu.Unlock()
+	if !ready {
+		log.Warnf("[runner] auth-revoked response (%d/%d) — will logout after %d consecutive failures", r.authFailures, apiFailureThreshold, apiFailureThreshold)
+		return nil
+	}
+	// Always return ErrRegistrationRevoked so every caller (winner and loser of
+	// the Once race) stops its loop — the Once ensures the callback fires once.
 	r.revokedOnce.Do(func() {
 		log.Warn("[runner] runner was removed or token revoked on the server — clearing local configuration")
 		if r.onRevoked != nil {
 			r.onRevoked()
 		}
-		returnErr = ErrRegistrationRevoked
 	})
-	return returnErr
+	return ErrRegistrationRevoked
 }
 
 func (r *Runner) notify(fn func(StatusSink)) {

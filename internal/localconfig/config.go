@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"workflowfiesta-runner/internal/platform"
@@ -18,12 +19,14 @@ func NamedAuditLogPath(runnerName, runnerID string) string {
 	return filepath.Join(home, ".workflowfiesta", filename)
 }
 
-// sanitizeForFilename replaces characters that are invalid in filenames with dashes.
+// sanitizeForFilename replaces characters that are invalid or problematic in
+// filenames with dashes. Spaces are replaced to avoid breaking shell scripts
+// that split on whitespace without quoting.
 func sanitizeForFilename(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch r {
-		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|', ' ':
 			b.WriteRune('-')
 		default:
 			b.WriteRune(r)
@@ -34,7 +37,8 @@ func sanitizeForFilename(s string) string {
 
 // UpdateAuditLogForRunner switches AuditLog to the runner-specific named path
 // when the runner name and ID are known and the path is still the generic default.
-// Returns true if changed — caller should save the config.
+// Existing content from the old log is appended to the new file so no audit
+// history is orphaned. Returns true if changed — caller should save the config.
 func (c *LocalConfig) UpdateAuditLogForRunner(runnerName, runnerID string) bool {
 	if runnerName == "" || runnerID == "" {
 		return false
@@ -48,8 +52,48 @@ func (c *LocalConfig) UpdateAuditLogForRunner(runnerName, runnerID string) bool 
 	if c.AuditLog != "" && filepath.Clean(c.AuditLog) != defaultLog {
 		return false // user has a custom path, don't override
 	}
+	migrateAuditLog(defaultLog, named)
 	c.AuditLog = named
 	return true
+}
+
+// migrateAuditLog appends the content of src to dst so existing audit entries
+// are not orphaned when the log path migrates from the generic to the named file.
+// If migration fails, a JSON warning entry is written to dst so the audit trail
+// records that historical entries may be missing.
+func migrateAuditLog(src, dst string) {
+	data, err := os.ReadFile(src)
+	if err != nil || len(data) == 0 {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		writeMigrationWarning(dst, src, err)
+		return
+	}
+	f, err := os.OpenFile(dst, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		writeMigrationWarning(dst, src, err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		writeMigrationWarning(dst, src, err)
+	}
+}
+
+func writeMigrationWarning(dst, src string, migrationErr error) {
+	f, err := os.OpenFile(dst, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	entry := fmt.Sprintf(
+		`{"time":%q,"event":"audit_migration_failed","src":%q,"error":%q}`+"\n",
+		time.Now().UTC().Format(time.RFC3339),
+		src,
+		migrationErr.Error(),
+	)
+	_, _ = f.WriteString(entry)
 }
 
 // LocalConfig holds the configuration for local executor mode, loaded from runner.yaml.

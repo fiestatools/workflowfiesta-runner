@@ -506,3 +506,84 @@ func TestHandleRunLocalScript_MissingName(t *testing.T) {
 		t.Error("SetIdle should have been called after missing name failure")
 	}
 }
+
+// ── handleAuthRevoked ─────────────────────────────────────────────────────────
+
+func TestHandleAuthRevoked_SingleFailure_ReturnsNil(t *testing.T) {
+	r := runner.NewForTestWithRevoked(func() {
+		t.Error("onRevoked should not fire on first auth failure")
+	})
+	err := r.HandleAuthRevoked(api.AuthRevokedError(401, "/test", nil))
+	if err != nil {
+		t.Errorf("expected nil on first failure, got %v", err)
+	}
+}
+
+func TestHandleAuthRevoked_ThresholdReached_ReturnsError(t *testing.T) {
+	var called int32
+	r := runner.NewForTestWithRevoked(func() { atomic.AddInt32(&called, 1) })
+
+	authErr := api.AuthRevokedError(401, "/test", nil)
+
+	// First failure — below threshold
+	if err := r.HandleAuthRevoked(authErr); err != nil {
+		t.Fatalf("expected nil on first failure, got %v", err)
+	}
+	// Second failure — hits threshold
+	if err := r.HandleAuthRevoked(authErr); !errors.Is(err, runner.ErrRegistrationRevoked) {
+		t.Errorf("expected ErrRegistrationRevoked on second failure, got %v", err)
+	}
+	if atomic.LoadInt32(&called) != 1 {
+		t.Errorf("onRevoked called %d times, want 1", called)
+	}
+}
+
+func TestHandleAuthRevoked_ResetsOnSuccess(t *testing.T) {
+	var called int32
+	r := runner.NewForTestWithRevoked(func() { atomic.AddInt32(&called, 1) })
+
+	authErr := api.AuthRevokedError(401, "/test", nil)
+
+	// One failure, then a success resets the counter
+	_ = r.HandleAuthRevoked(authErr)
+	_ = r.HandleAuthRevoked(nil) // success — resets authFailures to 0
+	// One more failure — should not trigger (counter reset)
+	if err := r.HandleAuthRevoked(authErr); err != nil {
+		t.Errorf("expected nil after reset, got %v", err)
+	}
+	if atomic.LoadInt32(&called) != 0 {
+		t.Error("onRevoked should not have fired after counter reset")
+	}
+}
+
+func TestHandleAuthRevoked_BothGoroutinesReturnError(t *testing.T) {
+	var callbackCount int32
+	r := runner.NewForTestWithRevoked(func() { atomic.AddInt32(&callbackCount, 1) })
+
+	authErr := api.AuthRevokedError(401, "/test", nil)
+
+	// Saturate the threshold first
+	_ = r.HandleAuthRevoked(authErr)
+
+	// Now fire concurrently — both should get ErrRegistrationRevoked,
+	// but the callback must fire exactly once.
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = r.HandleAuthRevoked(authErr)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if !errors.Is(err, runner.ErrRegistrationRevoked) {
+			t.Errorf("goroutine %d: expected ErrRegistrationRevoked, got %v", i, err)
+		}
+	}
+	if n := atomic.LoadInt32(&callbackCount); n != 1 {
+		t.Errorf("onRevoked called %d times, want exactly 1", n)
+	}
+}

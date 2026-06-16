@@ -122,7 +122,7 @@ func (c *Client) PollNextJob() (*Job, int, error) {
 	}
 	if status >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		if AuthRevokedStatus(status) {
+		if ShouldRevokeAuth(status, b) {
 			return nil, status, AuthRevokedError(status, "/api/runner/jobs/next", b)
 		}
 		msg := strings.TrimSpace(string(b))
@@ -160,7 +160,7 @@ func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarc
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		if AuthRevokedStatus(resp.StatusCode) {
+		if ShouldRevokeAuth(resp.StatusCode, b) {
 			return "", AuthRevokedError(resp.StatusCode, "/api/runner/heartbeat", b)
 		}
 		msg := strings.TrimSpace(string(b))

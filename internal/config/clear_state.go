@@ -14,11 +14,11 @@ import (
 // directory are always preserved.
 // deleteScripts: when true, the ~/.workflowfiesta/scripts/ org cache is removed.
 //
-// preserveAuditPaths must contain this runner's audit log path(s) so the
-// function knows which files belong to it vs. other runners.
-func ClearLocalState(configPath string, deleteAuditLogs, deleteScripts bool, preserveAuditPaths []string) error {
+// thisRunnerAuditPaths contains this runner's own audit log path(s) so the
+// function can distinguish them from other runners' logs on the same machine.
+func ClearLocalState(configPath string, deleteAuditLogs, deleteScripts bool, thisRunnerAuditPaths []string) error {
 	homeStateDir := filepath.Dir(CredentialsFilePath())
-	preserve := buildPreserveSet(homeStateDir, deleteAuditLogs, deleteScripts, preserveAuditPaths)
+	preserve := buildPreserveSet(homeStateDir, deleteAuditLogs, deleteScripts, thisRunnerAuditPaths)
 
 	if err := clearHomeStateExcept(homeStateDir, preserve); err != nil {
 		return err
@@ -26,7 +26,7 @@ func ClearLocalState(configPath string, deleteAuditLogs, deleteScripts bool, pre
 
 	// Remove this runner's audit log at external paths (outside homeStateDir) when requested.
 	if deleteAuditLogs {
-		for _, p := range preserveAuditPaths {
+		for _, p := range thisRunnerAuditPaths {
 			if abs, err := filepath.Abs(p); err == nil {
 				clean := filepath.Clean(abs)
 				if !strings.HasPrefix(clean, homeStateDir+string(os.PathSeparator)) {
@@ -49,15 +49,15 @@ func ClearLocalState(configPath string, deleteAuditLogs, deleteScripts bool, pre
 // buildPreserveSet constructs the set of absolute paths inside homeStateDir to keep.
 // Other runners' named audit logs (audit-*-*.log) are always preserved regardless
 // of deleteAuditLogs — only this runner's own log is subject to deletion.
-func buildPreserveSet(homeStateDir string, deleteAuditLogs, deleteScripts bool, preserveAuditPaths []string) map[string]struct{} {
+func buildPreserveSet(homeStateDir string, deleteAuditLogs, deleteScripts bool, thisRunnerAuditPaths []string) map[string]struct{} {
 	preserve := make(map[string]struct{})
 
 	// Always keep other runners' audit logs.
-	for p := range otherRunnerAuditLogs(homeStateDir, preserveAuditPaths) {
+	for p := range otherRunnerAuditLogs(homeStateDir, thisRunnerAuditPaths) {
 		preserve[p] = struct{}{}
 	}
 	if !deleteAuditLogs {
-		for p, v := range auditPreserveSet(preserveAuditPaths) {
+		for p, v := range auditPreserveSet(thisRunnerAuditPaths) {
 			preserve[p] = v
 		}
 	}
@@ -67,27 +67,32 @@ func buildPreserveSet(homeStateDir string, deleteAuditLogs, deleteScripts bool, 
 	return preserve
 }
 
-// otherRunnerAuditLogs returns the set of audit-*-*.log files in homeStateDir
-// that do NOT belong to this runner (i.e. not in thisRunnerPaths).
+// otherRunnerAuditLogs returns paths inside homeStateDir that must be preserved
+// because they belong to other runners. This includes:
+//   - audit-*-*.log files in homeStateDir that don't belong to this runner
+//   - subdirectories that contain such files (preserved at the dir level)
 func otherRunnerAuditLogs(homeStateDir string, thisRunnerPaths []string) map[string]struct{} {
 	thisRunner := auditPreserveSet(thisRunnerPaths)
 	result := make(map[string]struct{})
-	entries, err := os.ReadDir(homeStateDir)
-	if err != nil {
-		return result
-	}
-	for _, ent := range entries {
-		if ent.IsDir() {
-			continue
+
+	filepath.WalkDir(homeStateDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
+		if err != nil || d.IsDir() {
+			return nil
 		}
-		name := ent.Name()
+		name := d.Name()
 		if strings.HasPrefix(name, "audit-") && strings.HasSuffix(name, ".log") {
-			abs := filepath.Clean(filepath.Join(homeStateDir, name))
+			abs := filepath.Clean(path)
 			if _, isThis := thisRunner[abs]; !isThis {
 				result[abs] = struct{}{}
+				// Preserve ancestors so RemoveAll on a top-level entry doesn't wipe the subtree.
+				for dir := filepath.Clean(filepath.Dir(abs)); dir != homeStateDir; dir = filepath.Clean(filepath.Dir(dir)) {
+					result[dir] = struct{}{}
+				}
 			}
 		}
-	}
+		return nil
+	})
+
 	return result
 }
 
@@ -106,8 +111,6 @@ func auditPreserveSet(paths []string) map[string]struct{} {
 	for _, p := range paths {
 		add(p)
 	}
-	home, _ := os.UserHomeDir()
-	add(filepath.Join(home, ".workflowfiesta", "audit.log"))
 	return set
 }
 
@@ -138,7 +141,7 @@ func isPreservedPath(path string, preserve map[string]struct{}) bool {
 	}
 	// Symlink or equivalent path to a preserved audit file.
 	for p := range preserve {
-		if sameFile(path, p) {
+		if sameFile(clean, p) {
 			return true
 		}
 	}

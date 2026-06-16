@@ -112,6 +112,20 @@ func NewToolHandlerForTest(t *testing.T) (*executor.ToolHandler, string) {
 	return handler, scriptContent
 }
 
+// HandleAuthRevoked exposes handleAuthRevoked for unit tests.
+func (r *Runner) HandleAuthRevoked(err error) error {
+	return r.handleAuthRevoked(err)
+}
+
+// NewForTestWithRevoked creates a Runner wired with an onRevoked callback.
+func NewForTestWithRevoked(onRevoked func()) *Runner {
+	return &Runner{
+		client:    api.New("http://localhost:0", "test-token"),
+		semaphore: make(chan struct{}, 4),
+		onRevoked: onRevoked,
+	}
+}
+
 // ScriptBlurb exposes the package-level scriptBlurb for unit tests.
 var ScriptBlurb = scriptBlurb
 
