@@ -66,7 +66,7 @@ func migrateAuditLog(src, dst string) {
 	if err != nil || len(data) == 0 {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+	if err = os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		writeMigrationWarning(dst, src, err)
 		return
 	}

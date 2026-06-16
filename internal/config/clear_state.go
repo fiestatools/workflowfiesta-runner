@@ -76,7 +76,10 @@ func otherRunnerAuditLogs(homeStateDir string, thisRunnerPaths []string) map[str
 	result := make(map[string]struct{})
 
 	filepath.WalkDir(homeStateDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
-		if err != nil || d.IsDir() {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
 			return nil
 		}
 		name := d.Name()
