@@ -10,9 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 	log "github.com/sirupsen/logrus"
-
 	"workflowfiesta-runner/internal/httputil"
 	"workflowfiesta-runner/internal/platform"
 )
@@ -117,17 +115,16 @@ func (c *Client) PollNextJob() (*Job, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	status := resp.StatusCode
-	if status == 401 {
-		resp.Body.Close()
-		log.Fatal("[runner] authentication failed — check your token and re-register the runner")
-	}
 	defer resp.Body.Close()
+	status := resp.StatusCode
 	if status == 204 {
 		return nil, 204, nil // no pending job
 	}
 	if status >= 400 {
 		b, _ := io.ReadAll(resp.Body)
+		if ShouldRevokeAuth(status, b) {
+			return nil, status, AuthRevokedError(status, "/api/runner/jobs/next", b)
+		}
 		msg := strings.TrimSpace(string(b))
 		if len(msg) > 400 {
 			msg = msg[:400] + "…"
@@ -163,6 +160,9 @@ func (c *Client) SendHeartbeat(status string, capabilities []string, goos, goarc
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
+		if ShouldRevokeAuth(resp.StatusCode, b) {
+			return "", AuthRevokedError(resp.StatusCode, "/api/runner/heartbeat", b)
+		}
 		msg := strings.TrimSpace(string(b))
 		if len(msg) > 400 {
 			msg = msg[:400] + "…"

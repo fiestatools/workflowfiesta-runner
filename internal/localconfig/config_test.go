@@ -268,3 +268,131 @@ func TestDefaultPath_ContainsWorkflowfiesta(t *testing.T) {
 		t.Errorf("DefaultPath = %q should end with runner.yaml", p)
 	}
 }
+
+// ── sanitizeForFilename ───────────────────────────────────────────────────────
+
+func TestSanitizeForFilename_ReplacesSpaces(t *testing.T) {
+	got := sanitizeForFilename("my mac runner")
+	want := "my-mac-runner"
+	if got != want {
+		t.Errorf("sanitizeForFilename(%q) = %q, want %q", "my mac runner", got, want)
+	}
+}
+
+func TestSanitizeForFilename_ReplacesSpecialChars(t *testing.T) {
+	got := sanitizeForFilename(`a/b\c:d*e?f"g<h>i|j`)
+	for _, ch := range got {
+		if ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?' ||
+			ch == '"' || ch == '<' || ch == '>' || ch == '|' {
+			t.Errorf("sanitizeForFilename result contains invalid char %q: %s", ch, got)
+		}
+	}
+}
+
+func TestSanitizeForFilename_SafeCharsUnchanged(t *testing.T) {
+	input := "my-runner_v2.0"
+	got := sanitizeForFilename(input)
+	if got != input {
+		t.Errorf("sanitizeForFilename(%q) = %q, want unchanged", input, got)
+	}
+}
+
+// ── migrateAuditLog ───────────────────────────────────────────────────────────
+
+func TestMigrateAuditLog_CopiesContentToNewFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "audit.log")
+	dst := filepath.Join(dir, "audit-runner-abc.log")
+
+	content := `{"time":"2026-01-01","job_id":"x"}` + "\n"
+	if err := os.WriteFile(src, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	migrateAuditLog(src, dst)
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("dst not created: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("dst content = %q, want %q", got, content)
+	}
+}
+
+func TestMigrateAuditLog_NoopWhenSrcMissing(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "audit-runner-abc.log")
+
+	migrateAuditLog(filepath.Join(dir, "nonexistent.log"), dst)
+
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("dst should not be created when src is missing")
+	}
+}
+
+func TestMigrateAuditLog_WritesWarningOnWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "audit.log")
+	// dst in a non-existent subdirectory that MkdirAll cannot create (read-only parent)
+	roDir := filepath.Join(dir, "readonly")
+	if err := os.MkdirAll(roDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(roDir, "sub", "audit-runner-abc.log")
+
+	content := `{"time":"2026-01-01","job_id":"x"}` + "\n"
+	if err := os.WriteFile(src, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	migrateAuditLog(src, dst)
+
+	// dst itself can't be created, but warning should be attempted at dst
+	// (best-effort — we just verify no panic and function returns)
+}
+
+// ── UpdateAuditLogForRunner migration ─────────────────────────────────────────
+
+func TestUpdateAuditLogForRunner_MigratesExistingContent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	stateDir := filepath.Join(dir, ".workflowfiesta")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLog := filepath.Join(stateDir, "audit.log")
+	oldContent := `{"time":"2026-01-01","job_id":"old"}` + "\n"
+	if err := os.WriteFile(oldLog, []byte(oldContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &LocalConfig{AuditLog: oldLog}
+	changed := cfg.UpdateAuditLogForRunner("my-runner", "abc123")
+	if !changed {
+		t.Fatal("expected UpdateAuditLogForRunner to return true")
+	}
+
+	namedLog := NamedAuditLogPath("my-runner", "abc123")
+	got, err := os.ReadFile(namedLog)
+	if err != nil {
+		t.Fatalf("named log not created: %v", err)
+	}
+	if string(got) != oldContent {
+		t.Errorf("named log content = %q, want %q", got, oldContent)
+	}
+}
+
+func TestUpdateAuditLogForRunner_SpacesInNameSanitized(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	cfg := &LocalConfig{}
+	cfg.UpdateAuditLogForRunner("my mac", "abc-123")
+
+	if strings.Contains(cfg.AuditLog, " ") {
+		t.Errorf("AuditLog path contains space: %q", cfg.AuditLog)
+	}
+}

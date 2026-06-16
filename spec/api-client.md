@@ -16,7 +16,7 @@ The runner communicates with the WorkflowFiesta API over plain HTTPS. There is n
 
 All request and response bodies are JSON.
 
-**Auth failure:** `GET /api/runner/jobs/next` returning 401 is treated as fatal (`log.Fatal`) — the runner exits so an operator re-registers rather than spinning. Other 4xx/5xx responses return errors and the loop continues.
+**Auth failure:** `GET /api/runner/jobs/next` or `POST /api/runner/heartbeat` returning **401, 403, or 404** is treated as registration revoked. The runner clears `~/.workflowfiesta` (credentials + config), relaunches the app without credential env vars (GUI → setup wizard), and exits cleanly — no crash loop on restart.
 
 - `c.orgID` is protected by `c.mu` mutex.
 - All requests go through `c.do()` which acquires `c.mu` to read `orgID`.

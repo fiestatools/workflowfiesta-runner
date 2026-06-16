@@ -40,6 +40,10 @@ type StatusSink interface {
 // are required before marking the runner as disconnected from the platform.
 const apiFailureThreshold = 2
 
+// ErrRegistrationRevoked is returned when the server no longer accepts this
+// runner's credentials (e.g. runner deleted in the admin UI).
+var ErrRegistrationRevoked = errors.New("runner registration revoked on server")
+
 type Runner struct {
 	cfg         *config.Config
 	client      *api.Client
@@ -54,6 +58,10 @@ type Runner struct {
 	connMu       sync.Mutex
 	apiReachable bool
 	apiFailures  int
+	authFailures int // consecutive auth-revoked responses; must reach apiFailureThreshold before logout
+
+	onRevoked   func(reason string)
+	revokedOnce sync.Once
 }
 
 func New(cfg *config.Config) *Runner {
@@ -80,6 +88,42 @@ func New(cfg *config.Config) *Runner {
 func (r *Runner) WithSink(sink StatusSink) *Runner {
 	r.sinks = append(r.sinks, sink)
 	return r
+}
+
+// WithOnRegistrationRevoked registers a one-shot callback when the server
+// rejects this runner's token (deleted/unregistered). Typically clears local
+// credentials and relaunches the setup flow. reason is the error message from
+// the server response, suitable for writing to the audit log.
+func (r *Runner) WithOnRegistrationRevoked(fn func(reason string)) *Runner {
+	r.onRevoked = fn
+	return r
+}
+
+func (r *Runner) handleAuthRevoked(err error) error {
+	if err == nil || !api.IsAuthRevoked(err) {
+		r.connMu.Lock()
+		r.authFailures = 0
+		r.connMu.Unlock()
+		return nil
+	}
+	r.connMu.Lock()
+	r.authFailures++
+	ready := r.authFailures >= apiFailureThreshold
+	r.connMu.Unlock()
+	if !ready {
+		log.Warnf("[runner] auth-revoked response (%d/%d) — will logout after %d consecutive failures", r.authFailures, apiFailureThreshold, apiFailureThreshold)
+		return nil
+	}
+	// Always return ErrRegistrationRevoked so every caller (winner and loser of
+	// the Once race) stops its loop — the Once ensures the callback fires once.
+	reason := err.Error()
+	r.revokedOnce.Do(func() {
+		log.Warn("[runner] runner was removed or token revoked on the server — clearing local configuration")
+		if r.onRevoked != nil {
+			r.onRevoked(reason)
+		}
+	})
+	return ErrRegistrationRevoked
 }
 
 func (r *Runner) notify(fn func(StatusSink)) {
@@ -138,6 +182,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Response includes org_id — use it to namespace the script library and
 	// set X-Org-Id on all future requests for fast tenant routing.
 	orgID, err := r.client.SendHeartbeat("idle", RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
+	if revoked := r.handleAuthRevoked(err); revoked != nil {
+		return revoked
+	}
 	if err != nil {
 		log.Warnf("[runner] initial heartbeat failed: %v", err)
 		r.recordAPIFailure()
@@ -161,6 +208,11 @@ func (r *Runner) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-pollTicker.C:
 			job, _, err := r.client.PollNextJob()
+			if revoked := r.handleAuthRevoked(err); revoked != nil {
+				wg.Wait()
+				r.notify(func(s StatusSink) { s.SetConnected(false) })
+				return revoked
+			}
 			if err != nil {
 				log.Warnf("[runner] poll error: %v", err)
 				r.recordAPIFailure()
@@ -505,6 +557,9 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 				return false // stop after first
 			})
 			orgID, err := r.client.SendHeartbeat(status, RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
+			if revoked := r.handleAuthRevoked(err); revoked != nil {
+				return
+			}
 			if err != nil {
 				log.Warnf("[runner] heartbeat failed: %v", err)
 				r.recordAPIFailure()
