@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"workflowfiesta-runner/internal/auditlog"
 	"workflowfiesta-runner/internal/platform"
 )
 
@@ -57,6 +58,13 @@ func (c *LocalConfig) UpdateAuditLogForRunner(runnerName, runnerID string) bool 
 	return true
 }
 
+type migrationWarningEntry struct {
+	Time  string `json:"time"`
+	Event string `json:"event"`
+	Src   string `json:"src"`
+	Error string `json:"error"`
+}
+
 // migrateAuditLog appends the content of src to dst so existing audit entries
 // are not orphaned when the log path migrates from the generic to the named file.
 // If migration fails, a JSON warning entry is written to dst so the audit trail
@@ -82,18 +90,12 @@ func migrateAuditLog(src, dst string) {
 }
 
 func writeMigrationWarning(dst, src string, migrationErr error) {
-	f, err := os.OpenFile(dst, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	entry := fmt.Sprintf(
-		`{"time":%q,"event":"audit_migration_failed","src":%q,"error":%q}`+"\n",
-		time.Now().UTC().Format(time.RFC3339),
-		src,
-		migrationErr.Error(),
-	)
-	_, _ = f.WriteString(entry)
+	_ = auditlog.AppendLine(dst, migrationWarningEntry{
+		Time:  time.Now().UTC().Format(time.RFC3339),
+		Event: "audit_migration_failed",
+		Src:   src,
+		Error: migrationErr.Error(),
+	})
 }
 
 // LocalConfig holds the configuration for local executor mode, loaded from runner.yaml.

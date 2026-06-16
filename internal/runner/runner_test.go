@@ -510,7 +510,7 @@ func TestHandleRunLocalScript_MissingName(t *testing.T) {
 // ── handleAuthRevoked ─────────────────────────────────────────────────────────
 
 func TestHandleAuthRevoked_SingleFailure_ReturnsNil(t *testing.T) {
-	r := runner.NewForTestWithRevoked(func() {
+	r := runner.NewForTestWithRevoked(func(_ string) {
 		t.Error("onRevoked should not fire on first auth failure")
 	})
 	err := r.HandleAuthRevoked(api.AuthRevokedError(401, "/test", nil))
@@ -521,7 +521,7 @@ func TestHandleAuthRevoked_SingleFailure_ReturnsNil(t *testing.T) {
 
 func TestHandleAuthRevoked_ThresholdReached_ReturnsError(t *testing.T) {
 	var called int32
-	r := runner.NewForTestWithRevoked(func() { atomic.AddInt32(&called, 1) })
+	r := runner.NewForTestWithRevoked(func(_ string) { atomic.AddInt32(&called, 1) })
 
 	authErr := api.AuthRevokedError(401, "/test", nil)
 
@@ -540,7 +540,7 @@ func TestHandleAuthRevoked_ThresholdReached_ReturnsError(t *testing.T) {
 
 func TestHandleAuthRevoked_ResetsOnSuccess(t *testing.T) {
 	var called int32
-	r := runner.NewForTestWithRevoked(func() { atomic.AddInt32(&called, 1) })
+	r := runner.NewForTestWithRevoked(func(_ string) { atomic.AddInt32(&called, 1) })
 
 	authErr := api.AuthRevokedError(401, "/test", nil)
 
@@ -558,7 +558,7 @@ func TestHandleAuthRevoked_ResetsOnSuccess(t *testing.T) {
 
 func TestHandleAuthRevoked_BothGoroutinesReturnError(t *testing.T) {
 	var callbackCount int32
-	r := runner.NewForTestWithRevoked(func() { atomic.AddInt32(&callbackCount, 1) })
+	r := runner.NewForTestWithRevoked(func(_ string) { atomic.AddInt32(&callbackCount, 1) })
 
 	authErr := api.AuthRevokedError(401, "/test", nil)
 

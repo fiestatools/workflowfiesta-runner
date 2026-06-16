@@ -118,7 +118,7 @@ func (r *Runner) HandleAuthRevoked(err error) error {
 }
 
 // NewForTestWithRevoked creates a Runner wired with an onRevoked callback.
-func NewForTestWithRevoked(onRevoked func()) *Runner {
+func NewForTestWithRevoked(onRevoked func(reason string)) *Runner {
 	return &Runner{
 		client:    api.New("http://localhost:0", "test-token"),
 		semaphore: make(chan struct{}, 4),

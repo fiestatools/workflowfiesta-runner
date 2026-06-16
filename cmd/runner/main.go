@@ -194,10 +194,13 @@ func relaunchRunnerApp() error {
 // is already shutting down — there is no UI context to surface errors to, unlike
 // buildClearConfigurationHandler which is user-initiated and returns errors for
 // display.
-func buildRegistrationRevokedHandler(cfg *config.Config, configPath string, onStop func()) func() {
+func buildRegistrationRevokedHandler(cfg *config.Config, configPath string, onStop func()) func(reason string) {
 	auditPaths := auditLogPaths(cfg)
-	return func() {
+	return func(reason string) {
 		log.Warn("[runner] runner registration is no longer valid on the server — logging out locally")
+		if cfg != nil && cfg.LocalConfig != nil {
+			config.WriteRevocationEvent(cfg.LocalConfig.AuditLog, reason)
+		}
 		if err := config.ClearLocalState(configPath, false, false, auditPaths); err != nil {
 			log.Warnf("[runner] clear local state: %v", err)
 		}

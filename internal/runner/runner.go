@@ -60,7 +60,7 @@ type Runner struct {
 	apiFailures  int
 	authFailures int // consecutive auth-revoked responses; must reach apiFailureThreshold before logout
 
-	onRevoked   func()
+	onRevoked   func(reason string)
 	revokedOnce sync.Once
 }
 
@@ -92,8 +92,9 @@ func (r *Runner) WithSink(sink StatusSink) *Runner {
 
 // WithOnRegistrationRevoked registers a one-shot callback when the server
 // rejects this runner's token (deleted/unregistered). Typically clears local
-// credentials and relaunches the setup flow.
-func (r *Runner) WithOnRegistrationRevoked(fn func()) *Runner {
+// credentials and relaunches the setup flow. reason is the error message from
+// the server response, suitable for writing to the audit log.
+func (r *Runner) WithOnRegistrationRevoked(fn func(reason string)) *Runner {
 	r.onRevoked = fn
 	return r
 }
@@ -115,10 +116,11 @@ func (r *Runner) handleAuthRevoked(err error) error {
 	}
 	// Always return ErrRegistrationRevoked so every caller (winner and loser of
 	// the Once race) stops its loop — the Once ensures the callback fires once.
+	reason := err.Error()
 	r.revokedOnce.Do(func() {
 		log.Warn("[runner] runner was removed or token revoked on the server — clearing local configuration")
 		if r.onRevoked != nil {
-			r.onRevoked()
+			r.onRevoked(reason)
 		}
 	})
 	return ErrRegistrationRevoked

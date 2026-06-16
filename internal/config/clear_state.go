@@ -5,7 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"workflowfiesta-runner/internal/auditlog"
 )
+
+type revocationEntry struct {
+	Time   string `json:"time"`
+	Event  string `json:"event"`
+	Reason string `json:"reason"`
+}
 
 // ClearLocalState removes persisted runner credentials and configuration.
 //
@@ -163,6 +172,14 @@ func sameFile(a, b string) bool {
 		return true
 	}
 	return false
+}
+
+func WriteRevocationEvent(auditLogPath, reason string) {
+	_ = auditlog.AppendLine(auditLogPath, revocationEntry{
+		Time:   time.Now().UTC().Format(time.RFC3339),
+		Event:  "runner_revoked",
+		Reason: reason,
+	})
 }
 
 // AuditLogPathsFromConfig returns audit log file paths that may exist on disk.

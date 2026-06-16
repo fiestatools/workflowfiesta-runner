@@ -4,13 +4,11 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"sync"
@@ -18,6 +16,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"workflowfiesta-runner/internal/auditlog"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/localui"
 )
@@ -305,23 +304,8 @@ func (e *localExecutor) wrapWithLimits(script string) string {
 
 // writeAudit appends a JSON audit entry to the configured audit log.
 func (e *localExecutor) writeAudit(entry auditEntry) {
-	logPath := e.localCfg.AuditLog
-	if logPath == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		log.Warnf("[local] audit log mkdir: %v", err)
-		return
-	}
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		log.Warnf("[local] audit log open: %v", err)
-		return
-	}
-	defer f.Close()
-	data, _ := json.Marshal(entry)
-	if _, writeErr := f.Write(append(data, '\n')); writeErr != nil {
-		log.Warnf("[local] audit log write: %v", writeErr)
+	if err := auditlog.AppendLine(e.localCfg.AuditLog, entry); err != nil {
+		log.Warnf("[local] audit log write: %v", err)
 	}
 }
 
