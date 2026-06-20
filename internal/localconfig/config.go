@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -134,6 +135,22 @@ func DefaultPath() string {
 	return filepath.Join(home, ".workflowfiesta", "runner.yaml")
 }
 
+// defaultBlockedPatterns returns default blocked patterns, omitting Unix device-file guards on Windows.
+func defaultBlockedPatterns() []string {
+	patterns := []string{
+		`rm\s+-rf\s+/`,
+		`rm\s+-rf\s+~`,
+		`mkfs\.`,
+	}
+	if runtime.GOOS != "windows" {
+		patterns = append(patterns,
+			`dd\s.*of=/dev/[a-z]`,
+			`:.*>.*\s*/dev/[a-z]`,
+		)
+	}
+	return patterns
+}
+
 // Default returns a LocalConfig with safe, out-of-the-box defaults.
 func Default() *LocalConfig {
 	home, _ := os.UserHomeDir()
@@ -145,13 +162,7 @@ func Default() *LocalConfig {
 		MaxTimeout:      180,
 		ConfirmTimeout:  120,
 		SoundOnApproval: false,
-		BlockedPatterns: []string{
-			`rm\s+-rf\s+/`,
-			`rm\s+-rf\s+~`,
-			`dd\s.*of=/dev/[a-z]`,
-			`mkfs\.`,
-			`:.*>.*\s*/dev/[a-z]`,
-		},
+		BlockedPatterns: defaultBlockedPatterns(),
 		Sandbox:  "none",
 		AuditLog: auditLog,
 	}

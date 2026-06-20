@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -217,12 +218,22 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 // blockedPatternCheck returns the matching pattern and true if the script is blocked.
 func (e *localExecutor) blockedPatternCheck(script string) (string, bool) {
 	for _, pat := range e.localCfg.BlockedPatterns {
+		// /dev/ paths are not real device nodes on Windows — skip to avoid false positives like 2>/dev/null.
+		if runtime.GOOS == "windows" && strings.Contains(pat, `/dev/`) {
+			log.Debugf("[local] skipping Unix device pattern %q on Windows", pat)
+			continue
+		}
 		re, err := regexp.Compile(pat)
 		if err != nil {
 			log.Warnf("[local] invalid blocked_pattern %q: %v", pat, err)
 			continue
 		}
-		if re.MatchString(script) {
+		// /dev/null is a harmless sink on any OS — neutralize it before testing
+		testScript := script
+		if strings.Contains(pat, `/dev/`) {
+			testScript = strings.ReplaceAll(script, "/dev/null", "")
+		}
+		if re.MatchString(testScript) {
 			return pat, true
 		}
 	}
