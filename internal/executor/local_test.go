@@ -606,3 +606,70 @@ func envToMap(env []string) map[string]string {
 	}
 	return m
 }
+
+// ── OS-aware /dev/ pattern tests[] ─────────────────────────────────
+
+// setOS overrides currentOS for the duration of a test and restores it on cleanup.
+func setOS(t *testing.T, goos string) {
+	t.Helper()
+	orig := *CurrentOS
+	*CurrentOS = goos
+	t.Cleanup(func() { *CurrentOS = orig })
+}
+
+func TestBlockedPatternCheck_DevNull_AllowedOnLinux(t *testing.T) {
+	setOS(t, "linux")
+	e := testExecutor()
+	_, blocked := e.blockedPatternCheck("curl https://example.com 2>/dev/null")
+	if blocked {
+		t.Error("2>/dev/null must not be blocked on Linux — /dev/null is a harmless sink")
+	}
+}
+
+func TestBlockedPatternCheck_DevSda_BlockedOnLinux(t *testing.T) {
+	setOS(t, "linux")
+	e := testExecutor()
+	_, blocked := e.blockedPatternCheck(": > /dev/sda")
+	if !blocked {
+		t.Error(": > /dev/sda must be blocked on Linux — raw block device write")
+	}
+}
+
+func TestBlockedPatternCheck_DD_DevNull_Allowed(t *testing.T) {
+	setOS(t, "linux")
+	e := testExecutor()
+	_, blocked := e.blockedPatternCheck("dd if=/dev/zero of=/dev/null")
+	if blocked {
+		t.Error("dd of=/dev/null must not be blocked — /dev/null discards all writes")
+	}
+}
+
+func TestBlockedPatternCheck_DD_DevSda_Blocked(t *testing.T) {
+	setOS(t, "linux")
+	e := testExecutor()
+	_, blocked := e.blockedPatternCheck("dd if=/dev/zero of=/dev/sda")
+	if !blocked {
+		t.Error("dd of=/dev/sda must be blocked — overwrites raw disk")
+	}
+}
+
+func TestBlockedPatternCheck_DevNull_NotBlockedOnWindows(t *testing.T) {
+	setOS(t, "windows")
+	e := testExecutor(func(c *localconfig.LocalConfig) {
+		// Simulate a legacy runner.yaml with the old broad pattern.
+		c.BlockedPatterns = append(c.BlockedPatterns, `:.*>.*\s*/dev/[a-z]`)
+	})
+	_, blocked := e.blockedPatternCheck("curl https://example.com 2>/dev/null")
+	if blocked {
+		t.Error("2>/dev/null must not be blocked on Windows")
+	}
+}
+
+func TestBlockedPatternCheck_NonDevPatternsStillBlockOnWindows(t *testing.T) {
+	setOS(t, "windows")
+	e := testExecutor()
+	_, blocked := e.blockedPatternCheck("rm -rf /")
+	if !blocked {
+		t.Error("rm -rf / must still be blocked on Windows — skip is only for /dev/ patterns")
+	}
+}

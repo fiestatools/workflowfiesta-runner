@@ -9,6 +9,9 @@ import (
 // Expose internal helpers for testing.
 var ScriptFingerprint = scriptFingerprint
 
+// CurrentOS allows tests to override the OS name without needing a real host.
+var CurrentOS = &currentOS
+
 // SanitizeJobName exposes sanitizeJobName for unit tests.
 var SanitizeJobName = sanitizeJobName
 

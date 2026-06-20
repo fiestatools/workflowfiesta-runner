@@ -3,6 +3,7 @@ package localconfig
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -394,5 +395,25 @@ func TestUpdateAuditLogForRunner_SpacesInNameSanitized(t *testing.T) {
 
 	if strings.Contains(cfg.AuditLog, " ") {
 		t.Errorf("AuditLog path contains space: %q", cfg.AuditLog)
+	}
+}
+
+func TestDefault_DevPatternsOSAware(t *testing.T) {
+	cfg := Default()
+	hasDevPattern := false
+	for _, p := range cfg.BlockedPatterns {
+		if strings.Contains(p, "/dev/") {
+			hasDevPattern = true
+			break
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if hasDevPattern {
+			t.Error("Default() on Windows must not include /dev/ patterns")
+		}
+	} else {
+		if !hasDevPattern {
+			t.Error("Default() on Linux/macOS must include /dev/ device-file patterns")
+		}
 	}
 }
