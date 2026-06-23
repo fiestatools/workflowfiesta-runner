@@ -18,3 +18,4 @@ func (sw *StatusWindow) SetJobComplete(_, _ string, _ int)        {}
 func (sw *StatusWindow) AppendLog(_ string)                       {}
 func (sw *StatusWindow) SetOnOpenSettings(_ func())               {}
 func (sw *StatusWindow) SetStopAgentHandler(_ func(string) error) {}
+func (sw *StatusWindow) SetAuditLogPath(_ string)                 {}

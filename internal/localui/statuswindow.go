@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+	"workflowfiesta-runner/internal/auditlog"
 	"workflowfiesta-runner/internal/config"
 
 	"fyne.io/fyne/v2"
@@ -74,6 +76,13 @@ type activeJobCard struct {
 	stopElapsed func()
 }
 
+type stopAgentErrorEntry struct {
+	Time  string `json:"time"`
+	Event string `json:"event"`
+	JobID string `json:"job_id"`
+	Error string `json:"error"`
+}
+
 // ── StatusWindow ──────────────────────────────────────────────────────────────
 
 // StatusWindow is a small always-visible window showing runner status and logs.
@@ -102,6 +111,7 @@ type StatusWindow struct {
 	ctaBanner        *fyne.Container
 	stopAgentBtn     *cursorButton
 	stopAgentHandler func(string) error
+	auditLogPath     string
 	activeJobID      string
 
 	// Recent jobs
@@ -432,21 +442,29 @@ func (sw *StatusWindow) buildCTABanner() fyne.CanvasObject {
 
 	sw.stopAgentBtn = newButton("Stop Agent", func() {
 		jobID := sw.activeJobID
-		h := sw.stopAgentHandler
-		if jobID == "" || h == nil {
+		stopHandler := sw.stopAgentHandler
+		if jobID == "" || stopHandler == nil {
 			return
 		}
+		sw.stopAgentBtn.Disable()
 		go func(j string, doStop func(string) error) {
 			err := doStop(j)
 			fyne.Do(func() {
 				if err != nil {
-					sw.appendToLog(fmt.Sprintf("[stop agent] %v\n", err))
-					dialog.ShowError(fmt.Errorf("stop agent: %w", err), sw.win)
+					sw.appendToLog(fmt.Sprintf("[stop agent] error: %v\n", err))
+					log.Warnf("[stop agent] cancel request failed: %v", err)
+					_ = auditlog.AppendLine(sw.auditLogPath, stopAgentErrorEntry{
+						Time:  time.Now().UTC().Format(time.RFC3339),
+						Event: "stop_agent_error",
+						JobID: j,
+						Error: err.Error(),
+					})
+					sw.stopAgentBtn.Enable()
 				} else {
 					sw.appendToLog("[stop agent] cancel requested — notifying platform\n")
 				}
 			})
-		}(jobID, h)
+		}(jobID, stopHandler)
 	})
 	sw.stopAgentBtn.Importance = widget.LowImportance
 	sw.stopAgentBtn.Disable()
@@ -497,6 +515,11 @@ func (sw *StatusWindow) SetOnAPIConnected(fn func()) {
 // APIConnected reports whether the runner has reached the platform at least once.
 func (sw *StatusWindow) APIConnected() bool {
 	return sw.apiConnectedFlag.Load()
+}
+
+// SetAuditLogPath sets the path of the audit log file so stop-agent errors are persisted there.
+func (sw *StatusWindow) SetAuditLogPath(path string) {
+	sw.auditLogPath = path
 }
 
 // SetStopAgentHandler registers the callback used by "Stop Agent" (POST /api/runner/jobs/:id/cancel).
