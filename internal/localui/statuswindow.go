@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"workflowfiesta-runner/internal/config"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -466,20 +468,8 @@ func (sw *StatusWindow) buildCTABanner() fyne.CanvasObject {
 	return sw.ctaBanner
 }
 
-// deriveWebURL converts an API URL to the web app URL.
-// e.g. "https://api.workflowfiesta.com/..." → "https://app.workflowfiesta.com"
-// e.g. "https://staging.api.workflowfiesta.com/..." → "https://staging.app.workflowfiesta.com"
-// e.g. "http://localhost:<any>/..." → "http://localhost:3000"
 func deriveWebURL(apiURL string) string {
-	u, err := url.Parse(apiURL)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	if strings.HasPrefix(u.Host, "localhost") {
-		return (&url.URL{Scheme: u.Scheme, Host: "localhost:3000"}).String()
-	}
-	host := strings.Replace(u.Host, "api.", "app.", 1)
-	return (&url.URL{Scheme: u.Scheme, Host: host}).String()
+	return config.WebURLFor(apiURL)
 }
 
 // ── StatusSink implementation ─────────────────────────────────────────────────

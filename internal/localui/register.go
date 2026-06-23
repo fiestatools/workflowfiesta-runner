@@ -815,31 +815,11 @@ func writeCredentials(credPath string, r *RegistrationResult) error {
 	return os.WriteFile(credPath, []byte(content), 0o600)
 }
 
-// frontendURLFrom maps an API URL to its frontend counterpart:
-//
-//	api.workflowfiesta.com         → app.workflowfiesta.com
-//	staging.api.workflowfiesta.com → staging.app.workflowfiesta.com
-//	app.workflowfiesta.com         → app.workflowfiesta.com  (unchanged)
-//	localhost:5000                 → localhost:3000
+// frontendURLFrom maps an API URL to its frontend counterpart.
+// Falls back to the prod web URL for self-hosted/unknown instances.
 func frontendURLFrom(apiURL string) string {
-	s := strings.TrimRight(apiURL, "/")
-	parsed, err := url.Parse(s)
-	if err != nil {
-		return s
+	if web := config.WebURLFor(apiURL); web != "" {
+		return web
 	}
-	host := parsed.Hostname()
-	if strings.Contains(host, "api.") && !strings.Contains(host, "app.") {
-		newHost := strings.Replace(host, "api.", "app.", 1)
-		if parsed.Port() != "" {
-			parsed.Host = newHost + ":" + parsed.Port()
-		} else {
-			parsed.Host = newHost
-		}
-		return parsed.String()
-	}
-	if (host == "localhost" || host == "127.0.0.1") && parsed.Port() == "5000" {
-		parsed.Host = host + ":3000"
-		return parsed.String()
-	}
-	return s
+	return config.WebURLFor(config.DefaultAPIURL)
 }
