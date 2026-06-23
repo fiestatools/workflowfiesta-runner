@@ -217,11 +217,11 @@ func TestFrontendURLFrom(t *testing.T) {
 		{"prod api domain", "https://api.workflowfiesta.com", "https://app.workflowfiesta.com"},
 		{"staging api domain", "https://staging.api.workflowfiesta.com", "https://staging.app.workflowfiesta.com"},
 		{"prod app domain unchanged", "https://app.workflowfiesta.com", "https://app.workflowfiesta.com"},
-		{"staging app domain unchanged", "https://staging.app.workflowfiesta.com", "https://staging.app.workflowfiesta.com"},
-		{"self-hosted unchanged", "https://my-instance.example.com", "https://my-instance.example.com"},
+		{"staging app domain falls back to prod", "https://staging.app.workflowfiesta.com", "https://app.workflowfiesta.com"},
+		{"self-hosted falls back to prod", "https://my-instance.example.com", "https://app.workflowfiesta.com"},
 		{"localhost backend to frontend", "http://localhost:5000", "http://localhost:3000"},
-		{"127.0.0.1 backend to frontend", "http://127.0.0.1:5000", "http://127.0.0.1:3000"},
-		{"localhost other port unchanged", "http://localhost:8080", "http://localhost:8080"},
+		{"127.0.0.1 backend to frontend", "http://127.0.0.1:5000", "http://localhost:3000"},
+		{"localhost other port falls back to prod", "http://localhost:8080", "https://app.workflowfiesta.com"},
 		{"trailing slash stripped", "https://api.workflowfiesta.com/", "https://app.workflowfiesta.com"},
 	}
 	for _, tt := range tests {

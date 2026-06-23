@@ -159,10 +159,10 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 
 	// The runner's name was chosen at code-issuance time on the platform's
 	// /runners/setup page, so the binary doesn't need to ask for one.
-	getCodeURL, _ := url.Parse(strings.TrimRight(defaultAPIURL, "/") + "/runners/setup")
+	getCodeURL, _ := url.Parse(frontendURLFrom(defaultAPIURL) + "/runners/setup")
 	getCodeLink := widget.NewHyperlink("Don't have a code? Get one →", getCodeURL)
 	apiURLEntry.OnChanged = func(v string) {
-		if u, err := url.Parse(strings.TrimRight(strings.TrimSpace(v), "/") + "/runners/setup"); err == nil {
+		if u, err := url.Parse(frontendURLFrom(strings.TrimSpace(v)) + "/runners/setup"); err == nil {
 			getCodeLink.SetURL(u)
 		}
 	}
