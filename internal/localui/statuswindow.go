@@ -14,6 +14,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"workflowfiesta-runner/internal/auditlog"
+	"workflowfiesta-runner/internal/config"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -435,6 +436,9 @@ func (sw *StatusWindow) buildCTABanner() fyne.CanvasObject {
 		}
 	})
 	openBtn.Importance = widget.HighImportance
+	if sw.webURL == "" {
+		openBtn.Disable()
+	}
 
 	sw.stopAgentBtn = newButton("Stop Agent", func() {
 		jobID := sw.activeJobID
@@ -482,19 +486,8 @@ func (sw *StatusWindow) buildCTABanner() fyne.CanvasObject {
 	return sw.ctaBanner
 }
 
-// deriveWebURL converts an API URL to the likely web app URL.
-// e.g. "http://host/api" → "http://host", "http://host:3001" → "http://host:3000"
 func deriveWebURL(apiURL string) string {
-	// Strip trailing /api path segment
-	trimmed := strings.TrimSuffix(strings.TrimRight(apiURL, "/"), "/api")
-	if trimmed != apiURL && trimmed != "" {
-		return trimmed
-	}
-	// Common local dev: port 3001 → 3000
-	if strings.Contains(apiURL, ":3001") {
-		return strings.Replace(apiURL, ":3001", ":3000", 1)
-	}
-	return apiURL
+	return config.WebURLFor(apiURL)
 }
 
 // ── StatusSink implementation ─────────────────────────────────────────────────
