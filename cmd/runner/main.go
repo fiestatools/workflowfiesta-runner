@@ -455,6 +455,7 @@ var runLocalCmd = &cobra.Command{
 		r := newRunnerWithLogout(cfg, configPath, cancel)
 		sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
 		sw.SetStopAgentHandler(r.StopAgentJob)
+		sw.SetAuditLogPath(localCfg.AuditLog)
 		// Wire up the settings gear button on the status window.
 		sw.SetOnOpenSettings(func() {
 			localui.OpenSettingsWindow(localCfg, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
@@ -574,6 +575,7 @@ func main() {
 			r := newRunnerWithLogout(cfg, configPath, cancel)
 			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
 			sw.SetStopAgentHandler(r.StopAgentJob)
+			sw.SetAuditLogPath(cfg.LocalConfig.AuditLog)
 			localCfg2 := cfg.LocalConfig
 			sw.SetOnOpenSettings(func() {
 				localui.OpenSettingsWindow(localCfg2, configPath, func(updated *localconfig.LocalConfig) {
