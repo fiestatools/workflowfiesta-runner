@@ -90,6 +90,17 @@ func (r *Runner) WithSink(sink StatusSink) *Runner {
 	return r
 }
 
+// ActiveJobCount returns the number of currently executing jobs.
+// Safe to call from any goroutine.
+func (r *Runner) ActiveJobCount() int {
+	count := 0
+	r.activeJobs.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
 // WithOnRegistrationRevoked registers a one-shot callback when the server
 // rejects this runner's token (deleted/unregistered). Typically clears local
 // credentials and relaunches the setup flow. reason is the error message from

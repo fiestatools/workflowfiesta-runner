@@ -24,6 +24,7 @@ import (
 	"workflowfiesta-runner/internal/localui"
 	"workflowfiesta-runner/internal/platform"
 	"workflowfiesta-runner/internal/runner"
+	"workflowfiesta-runner/internal/updater"
 )
 
 var version = "dev"
@@ -312,6 +313,14 @@ var runCmd = &cobra.Command{
 
 		configPath := localconfig.DefaultPath()
 		r := newRunnerWithLogout(cfg, configPath, cancel).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
+
+		go updater.Run(version, false,
+			func(msg string) { log.Info(msg) },
+			func() bool { return r.ActiveJobCount() == 0 },
+			func() { os.Exit(0) },
+			"",
+		)
+
 		return runRunner(ctx, r)
 	},
 }
@@ -446,6 +455,12 @@ var runLocalCmd = &cobra.Command{
 
 		if headless {
 			r := newRunnerWithLogout(cfg, configPath, cancel).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
+			go updater.Run(version, false,
+				func(msg string) { log.Info(msg) },
+				func() bool { return r.ActiveJobCount() == 0 },
+				func() { os.Exit(0) },
+				localCfg.AuditLog,
+			)
 			return runRunner(ctx, r)
 		}
 
@@ -466,6 +481,13 @@ var runLocalCmd = &cobra.Command{
 		// Show before a.Run() — must be a direct call, not via fyne.Do,
 		// because the Fyne event loop hasn't started yet.
 		sw.Show()
+
+		go updater.Run(version, true,
+			func(msg string) { sw.AppendLog(msg+"\n") },
+			func() bool { return sw.ActiveJobCount() == 0 },
+			localui.QuitApp,
+			localCfg.AuditLog,
+		)
 
 		go func() {
 			if err := runRunner(ctx, r.WithSink(sw)); err != nil {
@@ -584,6 +606,13 @@ func main() {
 				}, buildClearConfigurationHandler(cfg, configPath, cancel))
 			})
 			sw.Show()
+
+			go updater.Run(version, true,
+				func(msg string) { sw.AppendLog(msg+"\n") },
+				func() bool { return sw.ActiveJobCount() == 0 },
+				localui.QuitApp,
+				cfg.LocalConfig.AuditLog,
+			)
 
 			sigs := make(chan os.Signal, 1)
 			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)

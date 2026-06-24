@@ -963,6 +963,10 @@ func (sw *StatusWindow) activeJobCount() int {
 	return len(sw.activeJobs)
 }
 
+func (sw *StatusWindow) ActiveJobCount() int {
+	return sw.activeJobCount()
+}
+
 func (sw *StatusWindow) uptimeTicker() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
