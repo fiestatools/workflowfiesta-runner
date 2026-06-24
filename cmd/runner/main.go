@@ -453,7 +453,7 @@ var runLocalCmd = &cobra.Command{
 		// The runner runs in a goroutine; Fyne event loop on main thread.
 		// macOS requires the GUI event loop on the main OS thread.
 		r := newRunnerWithLogout(cfg, configPath, cancel)
-		sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
+		sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL, cfg.ExecutorType)
 		sw.SetStopAgentHandler(r.StopAgentJob)
 		sw.SetAuditLogPath(localCfg.AuditLog)
 		// Wire up the settings gear button on the status window.
@@ -573,7 +573,7 @@ func main() {
 			applyNamedAuditLog(cfg, cfg.LocalConfig, configPath)
 
 			r := newRunnerWithLogout(cfg, configPath, cancel)
-			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL)
+			sw := localui.NewStatusWindow(cfg.Name, cfg.APIURL, cfg.ExecutorType)
 			sw.SetStopAgentHandler(r.StopAgentJob)
 			sw.SetAuditLogPath(cfg.LocalConfig.AuditLog)
 			localCfg2 := cfg.LocalConfig

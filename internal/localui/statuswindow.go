@@ -125,10 +125,11 @@ type StatusWindow struct {
 	suppressLogAutoScroll bool
 
 	// State tracking
-	state       runnerState
-	runnerName  string
-	apiURL      string
-	webURL      string
+	state        runnerState
+	runnerName   string
+	apiURL       string
+	webURL       string
+	executorType string
 	history     []jobRecord
 	jobsToday   int
 	jobsSuccess int
@@ -147,7 +148,7 @@ type StatusWindow struct {
 }
 
 // NewStatusWindow creates the status window (does not show it yet).
-func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
+func NewStatusWindow(runnerName, apiURL, executorType string) *StatusWindow {
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta Runner")
 	win.SetCloseIntercept(func() {
@@ -183,12 +184,13 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	})
 
 	sw := &StatusWindow{
-		win:        win,
-		runnerName: runnerName,
-		apiURL:     apiURL,
-		webURL:     deriveWebURL(apiURL),
-		startTime:  time.Now(),
-		activeJobs: make(map[string]*activeJobCard),
+		win:          win,
+		runnerName:   runnerName,
+		apiURL:       apiURL,
+		webURL:       deriveWebURL(apiURL),
+		executorType: executorType,
+		startTime:    time.Now(),
+		activeJobs:   make(map[string]*activeJobCard),
 	}
 
 	content := container.NewVBox(
@@ -251,9 +253,13 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 	nameLabel.TextStyle = fyne.TextStyle{Bold: true}
 	sw.hostLabel = canvas.NewText("connecting...", colorMuted)
 	sw.hostLabel.TextSize = 11
+	hostRow := container.NewHBox(
+		sw.hostLabel,
+		makeOutlineBadge("via "+sw.executorType, colorAmber, colorAmberDim),
+	)
 	infoCol := container.NewVBox(
 		container.NewWithoutLayout(nameLabel),
-		container.NewWithoutLayout(sw.hostLabel),
+		hostRow,
 	)
 
 	// Badge
@@ -263,14 +269,10 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 	sw.badgeText = canvas.NewText("Connecting", color.NRGBA{R: 59, G: 130, B: 246, A: 255})
 	sw.badgeText.TextSize = 11
 	sw.badgeText.TextStyle = fyne.TextStyle{Bold: true}
-	badgeInner := container.NewHBox(
-		container.NewPadded(dotCell),
-		sw.badgeText,
-		layout.NewSpacer(),
-	)
+	badgeInner := container.NewHBox(dotCell, sw.badgeText)
 	sw.badgeBg = canvas.NewRectangle(colorPrimaryDim)
 	sw.badgeBg.CornerRadius = 10
-	badge := container.NewStack(sw.badgeBg, container.NewPadded(badgeInner))
+	badge := container.NewStack(sw.badgeBg, container.New(layout.NewCustomPaddedLayout(4, 4, 8, 8), badgeInner))
 
 	// Gear / settings button
 	settingsBtn := newButton("⚙", func() {
@@ -284,7 +286,7 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 		iconCell,
 		container.NewPadded(infoCol),
 		layout.NewSpacer(),
-		badge,
+		container.NewCenter(badge),
 		settingsBtn,
 	)
 
@@ -490,6 +492,13 @@ func deriveWebURL(apiURL string) string {
 	return config.WebURLFor(apiURL)
 }
 
+func hostFromURL(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return rawURL
+}
+
 // ── StatusSink implementation ─────────────────────────────────────────────────
 
 // Show makes the window visible.
@@ -579,7 +588,7 @@ func (sw *StatusWindow) SetConnected(connected bool) {
 			} else {
 				sw.state = stateIdle
 			}
-			sw.hostLabel.Text = sw.apiURL
+			sw.hostLabel.Text = hostFromURL(sw.apiURL)
 			sw.hostLabel.Color = colorMuted
 			sw.ctaBanner.Show()
 			if firstConnect {
@@ -976,6 +985,16 @@ func (sw *StatusWindow) uptimeTicker() {
 }
 
 // ── widget factory helpers ────────────────────────────────────────────────────
+
+func makeOutlineBadge(text string, col color.Color, dimCol color.Color) fyne.CanvasObject {
+	label := canvas.NewText(text, col)
+	label.TextSize = 10
+	bg := canvas.NewRectangle(dimCol)
+	bg.StrokeColor = col
+	bg.StrokeWidth = 1
+	bg.CornerRadius = 3
+	return container.NewStack(bg, container.New(layout.NewCustomPaddedLayout(2, 2, 6, 6), container.NewHBox(label)))
+}
 
 func makeStatValue(text string, col color.Color) *canvas.Text {
 	t := canvas.NewText(text, col)

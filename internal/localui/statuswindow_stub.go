@@ -5,7 +5,7 @@ package localui
 // StatusWindow is a no-op stub used in server/headless builds (nolocalui tag).
 type StatusWindow struct{}
 
-func NewStatusWindow(_, _ string) *StatusWindow                   { return &StatusWindow{} }
+func NewStatusWindow(_, _, _ string) *StatusWindow                { return &StatusWindow{} }
 func (sw *StatusWindow) Show()                                    {}
 func (sw *StatusWindow) SetConnecting()                           {}
 func (sw *StatusWindow) SetReconnecting()                         {}
