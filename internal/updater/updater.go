@@ -41,19 +41,7 @@ func writeAudit(auditLogPath, event, from, to, errMsg string) {
 // Run checks GitHub for a newer release. If one is found and isIdle returns
 // true (no job is active), it downloads, verifies, installs, relaunches, and
 // then calls quitFn to stop the current process.
-//
-//   - logFn: receives human-readable progress messages; safe from any goroutine.
-//   - isIdle: called just before applying — skips the update if a job is running.
-//   - quitFn: called after the new process is launched; for GUI builds pass
-//     localui.QuitApp (lets Fyne shut down cleanly on its own goroutine); for
-//     headless builds pass a func that calls os.Exit(0).
-//   - auditLogPath: path to the audit log file; pass "" to disable audit logging.
-//
-// Pass currentVersion == "dev" to skip the check entirely (local builds).
 func Run(currentVersion string, isGUI bool, logFn func(string), isIdle func() bool, quitFn func(), auditLogPath string) {
-	if currentVersion == "dev" {
-		return
-	}
 
 	githubSource, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
 	if err != nil {
@@ -99,8 +87,7 @@ func Run(currentVersion string, isGUI bool, logFn func(string), isIdle func() bo
 	}
 
 	// Wire up progress now that we know the asset size.
-	// src.onProgress is nil during DetectLatest (no download happens there),
-	// so this is set exactly at the right moment before UpdateTo.
+	// src.onProgress is nil during DetectLatest (no download happens there)
 	src.onProgress = newProgressCallback(int64(rel.AssetByteSize), isGUI, logFn)
 
 	exePath, err := os.Executable()
@@ -125,8 +112,6 @@ func Run(currentVersion string, isGUI bool, logFn func(string), isIdle func() bo
 		return
 	}
 
-	// GUI: QuitApp schedules app.Quit() on Fyne's goroutine → a.Run() returns → clean exit.
-	// Headless: os.Exit(0) directly — no GUI framework to tear down.
 	quitFn()
 }
 
