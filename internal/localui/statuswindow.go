@@ -253,10 +253,13 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 	nameLabel.TextStyle = fyne.TextStyle{Bold: true}
 	sw.hostLabel = canvas.NewText("connecting...", colorMuted)
 	sw.hostLabel.TextSize = 11
+	hostRow := container.NewHBox(
+		sw.hostLabel,
+		makeOutlineBadge("via "+sw.executorType, colorAmber, colorAmberDim),
+	)
 	infoCol := container.NewVBox(
 		container.NewWithoutLayout(nameLabel),
-		container.NewWithoutLayout(sw.hostLabel),
-		container.NewHBox(makeOutlineBadge("via "+sw.executorType, colorAmber, colorAmberDim)),
+		hostRow,
 	)
 
 	// Badge
@@ -266,14 +269,10 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 	sw.badgeText = canvas.NewText("Connecting", color.NRGBA{R: 59, G: 130, B: 246, A: 255})
 	sw.badgeText.TextSize = 11
 	sw.badgeText.TextStyle = fyne.TextStyle{Bold: true}
-	badgeInner := container.NewHBox(
-		container.NewPadded(dotCell),
-		sw.badgeText,
-		layout.NewSpacer(),
-	)
+	badgeInner := container.NewHBox(dotCell, sw.badgeText)
 	sw.badgeBg = canvas.NewRectangle(colorPrimaryDim)
 	sw.badgeBg.CornerRadius = 10
-	badge := container.NewStack(sw.badgeBg, container.NewPadded(badgeInner))
+	badge := container.NewStack(sw.badgeBg, container.New(layout.NewCustomPaddedLayout(4, 4, 8, 8), badgeInner))
 
 	// Gear / settings button
 	settingsBtn := newButton("⚙", func() {
@@ -287,7 +286,7 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 		iconCell,
 		container.NewPadded(infoCol),
 		layout.NewSpacer(),
-		badge,
+		container.NewCenter(badge),
 		settingsBtn,
 	)
 
@@ -493,6 +492,13 @@ func deriveWebURL(apiURL string) string {
 	return config.WebURLFor(apiURL)
 }
 
+func hostFromURL(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return rawURL
+}
+
 // ── StatusSink implementation ─────────────────────────────────────────────────
 
 // Show makes the window visible.
@@ -582,7 +588,7 @@ func (sw *StatusWindow) SetConnected(connected bool) {
 			} else {
 				sw.state = stateIdle
 			}
-			sw.hostLabel.Text = sw.apiURL
+			sw.hostLabel.Text = hostFromURL(sw.apiURL)
 			sw.hostLabel.Color = colorMuted
 			sw.ctaBanner.Show()
 			if firstConnect {
