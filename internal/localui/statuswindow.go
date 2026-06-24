@@ -125,10 +125,11 @@ type StatusWindow struct {
 	suppressLogAutoScroll bool
 
 	// State tracking
-	state       runnerState
-	runnerName  string
-	apiURL      string
-	webURL      string
+	state        runnerState
+	runnerName   string
+	apiURL       string
+	webURL       string
+	executorType string
 	history     []jobRecord
 	jobsToday   int
 	jobsSuccess int
@@ -147,7 +148,7 @@ type StatusWindow struct {
 }
 
 // NewStatusWindow creates the status window (does not show it yet).
-func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
+func NewStatusWindow(runnerName, apiURL, executorType string) *StatusWindow {
 	a := getApp()
 	win := a.NewWindow("WorkflowFiesta Runner")
 	win.SetCloseIntercept(func() {
@@ -183,12 +184,13 @@ func NewStatusWindow(runnerName, apiURL string) *StatusWindow {
 	})
 
 	sw := &StatusWindow{
-		win:        win,
-		runnerName: runnerName,
-		apiURL:     apiURL,
-		webURL:     deriveWebURL(apiURL),
-		startTime:  time.Now(),
-		activeJobs: make(map[string]*activeJobCard),
+		win:          win,
+		runnerName:   runnerName,
+		apiURL:       apiURL,
+		webURL:       deriveWebURL(apiURL),
+		executorType: executorType,
+		startTime:    time.Now(),
+		activeJobs:   make(map[string]*activeJobCard),
 	}
 
 	content := container.NewVBox(
@@ -254,6 +256,7 @@ func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 	infoCol := container.NewVBox(
 		container.NewWithoutLayout(nameLabel),
 		container.NewWithoutLayout(sw.hostLabel),
+		container.NewHBox(makeOutlineBadge("via "+sw.executorType, colorAmber, colorAmberDim)),
 	)
 
 	// Badge
@@ -976,6 +979,16 @@ func (sw *StatusWindow) uptimeTicker() {
 }
 
 // ── widget factory helpers ────────────────────────────────────────────────────
+
+func makeOutlineBadge(text string, col color.Color, dimCol color.Color) fyne.CanvasObject {
+	label := canvas.NewText(text, col)
+	label.TextSize = 10
+	bg := canvas.NewRectangle(dimCol)
+	bg.StrokeColor = col
+	bg.StrokeWidth = 1
+	bg.CornerRadius = 3
+	return container.NewStack(bg, container.New(layout.NewCustomPaddedLayout(2, 2, 6, 6), container.NewHBox(label)))
+}
 
 func makeStatValue(text string, col color.Color) *canvas.Text {
 	t := canvas.NewText(text, col)
