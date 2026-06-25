@@ -114,6 +114,11 @@ type StatusWindow struct {
 	auditLogPath     string
 	activeJobID      string
 
+	// Update banner
+	updateBanner      *fyne.Container
+	updateBannerLabel *canvas.Text
+	onUpdateInstall   func() // called when user clicks "Update Now"
+
 	// Recent jobs
 	recentBox *fyne.Container
 
@@ -195,6 +200,7 @@ func NewStatusWindow(runnerName, apiURL, executorType string) *StatusWindow {
 
 	content := container.NewVBox(
 		sw.buildHeader(),
+		sw.buildUpdateBanner(),
 		sw.buildStatsStrip(),
 		sw.buildCTABanner(),
 		sw.buildJobCard(),
@@ -240,6 +246,75 @@ func NewStatusWindow(runnerName, apiURL, executorType string) *StatusWindow {
 }
 
 // ── section builders ──────────────────────────────────────────────────────────
+
+func (sw *StatusWindow) buildUpdateBanner() fyne.CanvasObject {
+	colorUpdateBg     := color.NRGBA{R: 59, G: 130, B: 246, A: 25}
+	colorUpdateBorder := color.NRGBA{R: 59, G: 130, B: 246, A: 80}
+
+	// centerV wraps an object in vertical spacers so it stays middle-aligned
+	// regardless of the row height set by taller siblings (e.g. buttons).
+	centerV := func(obj fyne.CanvasObject) fyne.CanvasObject {
+		return container.NewVBox(layout.NewSpacer(), obj, layout.NewSpacer())
+	}
+
+	icon := canvas.NewText("↑", colorText)
+	icon.TextSize = 13
+	icon.TextStyle = fyne.TextStyle{Bold: true}
+
+	sw.updateBannerLabel = canvas.NewText("Update available", colorText)
+	sw.updateBannerLabel.TextSize = 12
+
+	updateBtn := newButton("Update Now", func() {
+		if sw.onUpdateInstall != nil {
+			go sw.onUpdateInstall()
+		}
+	})
+	updateBtn.Importance = widget.HighImportance
+
+	dismissBtn := newButton("Dismiss", func() {
+		fyne.Do(func() { sw.updateBanner.Hide() })
+	})
+	dismissBtn.Importance = widget.LowImportance
+
+	bg := canvas.NewRectangle(colorUpdateBg)
+	bg.CornerRadius = 6
+	bg.StrokeColor = colorUpdateBorder
+	bg.StrokeWidth = 1
+
+	inner := container.NewHBox(
+		centerV(icon),
+		container.New(layout.NewCustomPaddedLayout(0, 0, 6, 0), centerV(sw.updateBannerLabel)),
+		layout.NewSpacer(),
+		updateBtn,
+		container.New(layout.NewCustomPaddedLayout(0, 0, 4, 0), dismissBtn),
+	)
+
+	sw.updateBanner = container.NewVBox(
+		container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4),
+			container.NewStack(bg,
+				container.New(layout.NewCustomPaddedLayout(8, 8, 10, 10), inner),
+			),
+		),
+	)
+	sw.updateBanner.Hide()
+	return sw.updateBanner
+}
+
+// ShowUpdateBanner makes the update banner visible with the given latest version.
+// Safe to call from any goroutine.
+func (sw *StatusWindow) ShowUpdateBanner(latestVersion string) {
+	fyne.Do(func() {
+		sw.updateBannerLabel.Text = fmt.Sprintf("Update available: %s", latestVersion)
+		sw.updateBannerLabel.Refresh()
+		sw.updateBanner.Show()
+		sw.updateBanner.Refresh()
+	})
+}
+
+// SetOnUpdateInstall registers the callback invoked when the user clicks "Update Now".
+func (sw *StatusWindow) SetOnUpdateInstall(fn func()) {
+	sw.onUpdateInstall = fn
+}
 
 func (sw *StatusWindow) buildHeader() fyne.CanvasObject {
 	// Icon cell — WorkflowFiesta logo

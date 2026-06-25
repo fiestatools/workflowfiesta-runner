@@ -141,6 +141,14 @@ func (c *Client) PollNextJob() (*Job, int, error) {
 	return &job, status, nil
 }
 
+// SendDraining notifies the server that this runner is about to apply an update
+// and should not receive new jobs. Best-effort — the caller proceeds regardless
+// of whether the server acknowledges it (backend may not support draining yet).
+func (c *Client) SendDraining(capabilities []string, goos, goarch, version string) error {
+	_, err := c.SendHeartbeat("draining", capabilities, goos, goarch, version)
+	return err
+}
+
 // SendHeartbeat updates last_seen, reports the runner's current status,
 // advertises supported capabilities, and identifies the runner's OS/arch/version.
 // Returns the runner's org_id from the server.

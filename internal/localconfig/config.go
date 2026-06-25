@@ -112,6 +112,7 @@ type LocalConfig struct {
 	AuditLog              string   `yaml:"audit_log"`             // path
 	SoundOnApproval       bool     `yaml:"sound_on_approval"`
 	AlwaysAllowedPatterns []string `yaml:"always_allowed_patterns"`
+	AutoUpdate            bool     `yaml:"auto_update"` // silently install updates on startup; default false (notify only)
 
 	// EnvironmentID is the UUID of an existing environment to associate this runner with.
 	// If empty, the server auto-creates a new environment on registration.

@@ -17,6 +17,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"runtime"
 
 	wfapi "workflowfiesta-runner/internal/api"
 	"workflowfiesta-runner/internal/config"
@@ -314,12 +315,15 @@ var runCmd = &cobra.Command{
 		configPath := localconfig.DefaultPath()
 		r := newRunnerWithLogout(cfg, configPath, cancel).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
 
-		go updater.Run(version, false,
-			func(msg string) { log.Info(msg) },
-			func() bool { return r.ActiveJobCount() == 0 },
-			func() { os.Exit(0) },
-			"",
-		)
+		updater.Start(updater.Options{
+			Version: version,
+			Log:     func(msg string) { log.Info(msg) },
+			IsIdle:  func() bool { return r.ActiveJobCount() == 0 },
+			Quit:    func() { os.Exit(0) },
+			OnUpdateAvailable: func(latest string) {
+				log.Infof("[updater] Update available: %s → %s. Run: workflowfiesta-runner update", version, latest)
+			},
+		})
 
 		return runRunner(ctx, r)
 	},
@@ -418,6 +422,7 @@ var runLocalCmd = &cobra.Command{
 
 		configPath, _ := cmd.Flags().GetString("config")
 		headless, _ := cmd.Flags().GetBool("headless")
+		autoUpdate, _ := cmd.Flags().GetBool("auto-update")
 
 		if configPath == "" {
 			configPath = localconfig.DefaultPath()
@@ -429,6 +434,9 @@ var runLocalCmd = &cobra.Command{
 		}
 		localCfg.Headless = headless
 		localui.Headless = headless
+		if autoUpdate {
+			localCfg.AutoUpdate = true
+		}
 
 		cfg.ExecutorType = "local"
 		cfg.LocalConfig = localCfg
@@ -455,12 +463,19 @@ var runLocalCmd = &cobra.Command{
 
 		if headless {
 			r := newRunnerWithLogout(cfg, configPath, cancel).WithSink(&cliSink{apiURL: cfg.APIURL, name: cfg.Name})
-			go updater.Run(version, false,
-				func(msg string) { log.Info(msg) },
-				func() bool { return r.ActiveJobCount() == 0 },
-				func() { os.Exit(0) },
-				localCfg.AuditLog,
-			)
+			client := wfapi.New(cfg.APIURL, cfg.Token)
+			updater.Start(updater.Options{
+				Version:      version,
+				Log:          func(msg string) { log.Info(msg) },
+				IsIdle:       func() bool { return r.ActiveJobCount() == 0 },
+				Drain:        func() error { return client.SendDraining(runner.RunnerCapabilities, runtime.GOOS, runtime.GOARCH, version) },
+				Quit:         func() { os.Exit(0) },
+				AuditLogPath: localCfg.AuditLog,
+				AutoUpdate:   localCfg.AutoUpdate,
+				OnUpdateAvailable: func(latest string) {
+					log.Infof("[updater] Update available: %s → %s. Run: workflowfiesta-runner update", version, latest)
+				},
+			})
 			return runRunner(ctx, r)
 		}
 
@@ -482,12 +497,31 @@ var runLocalCmd = &cobra.Command{
 		// because the Fyne event loop hasn't started yet.
 		sw.Show()
 
-		go updater.Run(version, true,
-			func(msg string) { sw.AppendLog(msg+"\n") },
-			func() bool { return sw.ActiveJobCount() == 0 },
-			localui.QuitApp,
-			localCfg.AuditLog,
-		)
+		client := wfapi.New(cfg.APIURL, cfg.Token)
+		updater.Start(updater.Options{
+			Version:      version,
+			IsGUI:        true,
+			Log:          func(msg string) { sw.AppendLog(msg + "\n") },
+			IsIdle:       func() bool { return sw.ActiveJobCount() == 0 },
+			Drain:        func() error { return client.SendDraining(runner.RunnerCapabilities, runtime.GOOS, runtime.GOARCH, version) },
+			Quit:         localui.QuitApp,
+			AuditLogPath: localCfg.AuditLog,
+			AutoUpdate:   localCfg.AutoUpdate,
+			OnUpdateAvailable: func(latest string) {
+				sw.SetOnUpdateInstall(func() {
+					updater.Install(updater.Options{
+						Version:      version,
+						IsGUI:        true,
+						Log:          func(msg string) { sw.AppendLog(msg + "\n") },
+						IsIdle:       func() bool { return sw.ActiveJobCount() == 0 },
+						Drain:        func() error { return client.SendDraining(runner.RunnerCapabilities, runtime.GOOS, runtime.GOARCH, version) },
+						Quit:         localui.QuitApp,
+						AuditLogPath: localCfg.AuditLog,
+					})
+				})
+				sw.ShowUpdateBanner(latest)
+			},
+		})
 
 		go func() {
 			if err := runRunner(ctx, r.WithSink(sw)); err != nil {
@@ -548,12 +582,39 @@ var registerLocalCmd = &cobra.Command{
 	},
 }
 
+var updateCmd = &cobra.Command{
+	Use:   "update",
+	Short: "Check for a newer release and install it",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := config.Load()
+		logFn := func(msg string) { log.Info(msg) }
+
+		var drainFn func() error
+		if cfg.Token != "" && cfg.APIURL != "" {
+			client := wfapi.New(cfg.APIURL, cfg.Token)
+			drainFn = func() error {
+				return client.SendDraining(runner.RunnerCapabilities, runtime.GOOS, runtime.GOARCH, version)
+			}
+		}
+
+		updater.Install(updater.Options{
+			Version:      version,
+			Log:          logFn,
+			Drain:        drainFn,
+			Quit:         func() { os.Exit(0) },
+			SkipRelaunch: true,
+		})
+		return nil
+	},
+}
+
 func init() {
 	registerCmd.Flags().String("code", "", "One-time registration code from WorkflowFiesta (required)")
 	registerCmd.Flags().String("api-url", "", "WorkflowFiesta API URL (defaults to "+config.DefaultAPIURL+", or $WORKFLOWFIESTA_API_URL)")
 
 	runLocalCmd.Flags().Bool("headless", false, "Skip GUI; use terminal y/n prompts (for SSH/CI use)")
 	runLocalCmd.Flags().String("config", "", "Path to runner.yaml (default: ~/.workflowfiesta/runner.yaml)")
+	runLocalCmd.Flags().Bool("auto-update", false, "Silently install updates on startup without prompting")
 
 	initLocalCmd.Flags().String("config", "", "Path to write runner.yaml (default: ~/.workflowfiesta/runner.yaml)")
 	registerLocalCmd.Flags().String("config", "", "Path to write runner.yaml (default: ~/.workflowfiesta/runner.yaml)")
@@ -564,6 +625,7 @@ func init() {
 	rootCmd.AddCommand(registerLocalCmd)
 	rootCmd.AddCommand(registerCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(updateCmd)
 }
 
 func main() {
@@ -607,12 +669,31 @@ func main() {
 			})
 			sw.Show()
 
-			go updater.Run(version, true,
-				func(msg string) { sw.AppendLog(msg+"\n") },
-				func() bool { return sw.ActiveJobCount() == 0 },
-				localui.QuitApp,
-				cfg.LocalConfig.AuditLog,
-			)
+			client := wfapi.New(cfg.APIURL, cfg.Token)
+			updater.Start(updater.Options{
+				Version:      version,
+				IsGUI:        true,
+				Log:          func(msg string) { sw.AppendLog(msg + "\n") },
+				IsIdle:       func() bool { return sw.ActiveJobCount() == 0 },
+				Drain:        func() error { return client.SendDraining(runner.RunnerCapabilities, runtime.GOOS, runtime.GOARCH, version) },
+				Quit:         localui.QuitApp,
+				AuditLogPath: cfg.LocalConfig.AuditLog,
+				AutoUpdate:   cfg.LocalConfig.AutoUpdate,
+				OnUpdateAvailable: func(latest string) {
+					sw.SetOnUpdateInstall(func() {
+						updater.Install(updater.Options{
+							Version:      version,
+							IsGUI:        true,
+							Log:          func(msg string) { sw.AppendLog(msg + "\n") },
+							IsIdle:       func() bool { return sw.ActiveJobCount() == 0 },
+							Drain:        func() error { return client.SendDraining(runner.RunnerCapabilities, runtime.GOOS, runtime.GOARCH, version) },
+							Quit:         localui.QuitApp,
+							AuditLogPath: cfg.LocalConfig.AuditLog,
+						})
+					})
+					sw.ShowUpdateBanner(latest)
+				},
+			})
 
 			sigs := make(chan os.Signal, 1)
 			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)

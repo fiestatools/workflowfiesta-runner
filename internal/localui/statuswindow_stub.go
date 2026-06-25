@@ -20,3 +20,5 @@ func (sw *StatusWindow) SetOnOpenSettings(_ func())               {}
 func (sw *StatusWindow) SetStopAgentHandler(_ func(string) error) {}
 func (sw *StatusWindow) SetAuditLogPath(_ string)                 {}
 func (sw *StatusWindow) ActiveJobCount() int                      { return 0 }
+func (sw *StatusWindow) ShowUpdateBanner(_ string)                {}
+func (sw *StatusWindow) SetOnUpdateInstall(_ func())              {}
