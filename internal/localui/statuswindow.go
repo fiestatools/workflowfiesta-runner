@@ -266,6 +266,7 @@ func (sw *StatusWindow) buildUpdateBanner() fyne.CanvasObject {
 
 	updateBtn := newButton("Update Now", func() {
 		if sw.onUpdateInstall != nil {
+			sw.updateBanner.Hide()
 			go sw.onUpdateInstall()
 		}
 	})

@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -60,6 +61,7 @@ type Runner struct {
 	apiFailures  int
 	authFailures int // consecutive auth-revoked responses; must reach apiFailureThreshold before logout
 
+	draining    atomic.Bool
 	onRevoked   func(reason string)
 	revokedOnce sync.Once
 }
@@ -99,6 +101,12 @@ func (r *Runner) ActiveJobCount() int {
 		return true
 	})
 	return count
+}
+
+// SetDraining marks the runner as draining so the heartbeat loop advertises
+// "draining" status instead of "idle"/"busy", preventing new job dispatch.
+func (r *Runner) SetDraining(v bool) {
+	r.draining.Store(v)
 }
 
 // WithOnRegistrationRevoked registers a one-shot callback when the server
@@ -561,12 +569,15 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Report busy if any active jobs, otherwise idle
 			status := "idle"
-			r.activeJobs.Range(func(_, _ interface{}) bool {
-				status = "busy"
-				return false // stop after first
-			})
+			if r.draining.Load() {
+				status = "draining"
+			} else {
+				r.activeJobs.Range(func(_, _ interface{}) bool {
+					status = "busy"
+					return false // stop after first
+				})
+			}
 			orgID, err := r.client.SendHeartbeat(status, RunnerCapabilities, runtime.GOOS, runtime.GOARCH, r.cfg.Version)
 			if revoked := r.handleAuthRevoked(err); revoked != nil {
 				return

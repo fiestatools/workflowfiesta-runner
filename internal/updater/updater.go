@@ -47,6 +47,10 @@ type Options struct {
 	// GUI: pass localui.QuitApp. Headless: pass func() { os.Exit(0) }.
 	Quit func()
 
+	// CancelDrain reverses a drain that was initiated but not completed (e.g.
+	// download failure, relaunch failure, drain timeout). Nil = do nothing.
+	CancelDrain func()
+
 	// SkipRelaunch skips spawning a replacement process. Used by the standalone
 	// `update` subcommand, which is a separate process from the running runner.
 	SkipRelaunch bool
@@ -211,6 +215,13 @@ func applyUpdate(opts Options) {
 		}
 	}
 
+	succeeded := false
+	defer func() {
+		if !succeeded && opts.CancelDrain != nil {
+			opts.CancelDrain()
+		}
+	}()
+
 	// Wait for any active job to finish.
 	if !waitUntilIdle(opts.IsIdle, log) {
 		log("[updater] timed out waiting for jobs to finish — will apply on next restart")
@@ -240,6 +251,7 @@ func applyUpdate(opts Options) {
 
 	if opts.SkipRelaunch {
 		log(fmt.Sprintf("[updater] updated to %s — restart the runner to apply", rel.Version()))
+		succeeded = true
 		opts.Quit()
 		return
 	}
@@ -250,6 +262,8 @@ func applyUpdate(opts Options) {
 		writeAudit(opts.AuditLogPath, "update_failed", opts.Version, rel.Version(), err.Error())
 		return
 	}
+
+	succeeded = true
 
 	opts.Quit()
 }
