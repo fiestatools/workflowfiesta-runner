@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -273,16 +274,42 @@ func (e *localExecutor) effectivePATH() string {
 	if runtime.GOOS == "darwin" {
 		// Apple Silicon (M1/M2) Homebrew installs to /opt/homebrew; Intel uses /usr/local.
 		// Include both so scripts find Homebrew-installed tools on either architecture.
-		return "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+		base := "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+		return e.prependDiscoveredDirs(base)
 	}
 	if runtime.GOOS == "windows" {
-		// On Windows, inherit the system PATH so scripts can find installed tools.
-		if p := os.Getenv("PATH"); p != "" {
-			return p
+		raw := os.Getenv("PATH")
+		if raw == "" {
+			raw = `C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem`
 		}
-		return `C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem`
+		return e.prependDiscoveredDirs(sanitizeWindowsPATH(raw))
 	}
-	return "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	return e.prependDiscoveredDirs("/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+}
+
+// prependDiscoveredDirs prepends the parent directories of any configured
+// interpreter paths to base, deduplicating entries as it goes.
+func (e *localExecutor) prependDiscoveredDirs(base string) string {
+	if len(e.localCfg.Interpreters) == 0 {
+		return base
+	}
+	seen := make(map[string]struct{})
+	var extra []string
+	for _, path := range e.localCfg.Interpreters {
+		if path == "" {
+			continue
+		}
+		dir := filepath.Dir(path)
+		if _, ok := seen[dir]; !ok {
+			seen[dir] = struct{}{}
+			extra = append(extra, dir)
+		}
+	}
+	if len(extra) == 0 {
+		return base
+	}
+	return strings.Join(extra, string(filepath.ListSeparator)) +
+		string(filepath.ListSeparator) + base
 }
 
 // buildEnv constructs a minimal, safe environment for the subprocess.

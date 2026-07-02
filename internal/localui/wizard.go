@@ -3,6 +3,7 @@
 package localui
 
 import (
+	"context"
 	"fmt"
 	"image/color"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
+	"workflowfiesta-runner/internal/interpreter"
 	"workflowfiesta-runner/internal/localconfig"
 )
 
@@ -35,7 +37,7 @@ func RunWizard(configPath string) error {
 	var saveErr error
 	var currentStep int
 
-	const numSteps = 4
+	const numSteps = 5
 
 	// ── progress dots ────────────────────────────────────────────────────────
 	dots := make([]*canvas.Rectangle, numSteps)
@@ -115,7 +117,55 @@ func RunWizard(configPath string) error {
 		}
 	}
 
-	// ── Step 1: Folder access ─────────────────────────────────────────────────
+	// ── Step 1: Interpreter discovery ────────────────────────────────────────
+	var discoveredInterpreters map[string]string
+	discoveryRows := container.NewVBox()
+	scanningLabel := canvas.NewText("Scanning for interpreters…", colorLabel)
+	scanningLabel.TextSize = 12
+
+	runDiscovery := func() {
+		go func() {
+			infos := interpreter.Discover(context.Background())
+			found := make(map[string]string)
+			rows := make([]fyne.CanvasObject, 0, len(infos))
+			for _, info := range infos {
+				var icon, detail string
+				switch info.Status {
+				case interpreter.StatusFound:
+					icon = "✓"
+					detail = info.Path
+					if info.Version != "" {
+						detail += "   (" + info.Version + ")"
+					}
+					found[info.Name] = info.Path
+				case interpreter.StatusStub:
+					icon = "⚠"
+					detail = "Windows Store stub — skipped"
+				default:
+					icon = "✗"
+					detail = "not found"
+				}
+				nameLabel := widget.NewLabel(icon + "  " + info.Name)
+				nameLabel.TextStyle = fyne.TextStyle{Monospace: true}
+				detailLabel := canvas.NewText(detail, colorLabel)
+				detailLabel.TextSize = 11
+				rows = append(rows, container.NewVBox(nameLabel, container.NewWithoutLayout(detailLabel)))
+			}
+			discoveredInterpreters = found
+			discoveryRows.Objects = rows
+			scanningLabel.Hide()
+			discoveryRows.Refresh()
+		}()
+	}
+
+	stepContainers[0] = container.NewVBox(
+		makeStepHeading("Interpreter Detection",
+			"Scanning for installed interpreters. Verified paths are saved to runner.yaml\nand prepended to the subprocess PATH at runtime."),
+		scanningLabel,
+		discoveryRows,
+	)
+
+	// ── Step 2: Folder access ─────────────────────────────────────────────────
 	pathsEntry := widget.NewMultiLineEntry()
 	pathsEntry.SetPlaceHolder("One path per line, e.g.\n~/projects\n~/Documents:ro")
 	pathsEntry.SetText("~/")
@@ -137,13 +187,13 @@ func RunWizard(configPath string) error {
 	pathHint := canvas.NewText("Append  :ro  for read-only access", colorLabel)
 	pathHint.TextSize = 11
 
-	stepContainers[0] = container.NewVBox(
+	stepContainers[1] = container.NewVBox(
 		makeStepHeading("Folder Access", "Which folders can scripts read and write?"),
 		pathsEntry,
 		container.NewHBox(browseBtn, container.NewWithoutLayout(pathHint)),
 	)
 
-	// ── Step 2: Approval mode ─────────────────────────────────────────────────
+	// ── Step 3: Approval mode ─────────────────────────────────────────────────
 	confirmRadio := widget.NewRadioGroup(
 		[]string{"Always (prompt for every job)", "Risky operations only (recommended)", "Never (auto-approve all jobs)"},
 		nil,
@@ -168,7 +218,7 @@ func RunWizard(configPath string) error {
 	soundCheck := widget.NewCheck("Play a sound when an approval request arrives", nil)
 	soundCheck.SetChecked(cfg.SoundOnApproval)
 
-	stepContainers[1] = container.NewVBox(
+	stepContainers[2] = container.NewVBox(
 		makeStepHeading("Approval & Timeouts", "When should you be asked to review a job, and how long should it wait?"),
 		confirmRadio,
 		widget.NewSeparator(),
@@ -178,19 +228,19 @@ func RunWizard(configPath string) error {
 		soundCheck,
 	)
 
-	// ── Step 3: Network ───────────────────────────────────────────────────────
+	// ── Step 4: Network ───────────────────────────────────────────────────────
 	networkRadio := widget.NewRadioGroup(
 		[]string{"Allow all (recommended)", "Local only (localhost / LAN)", "Block all outbound network"},
 		nil,
 	)
 	networkRadio.SetSelected("Allow all (recommended)")
 
-	stepContainers[2] = container.NewVBox(
+	stepContainers[3] = container.NewVBox(
 		makeStepHeading("Network Access", "Controls whether scripts can make outbound network requests."),
 		networkRadio,
 	)
 
-	// ── Step 4: Summary ───────────────────────────────────────────────────────
+	// ── Step 5: Summary ───────────────────────────────────────────────────────
 	summaryLabel := widget.NewLabel("")
 	summaryLabel.Wrapping = fyne.TextWrapWord
 	summaryBg := canvas.NewRectangle(colorCard)
@@ -199,7 +249,7 @@ func RunWizard(configPath string) error {
 	summaryBg.StrokeWidth = 1
 	summaryBlock := container.NewStack(summaryBg, container.NewPadded(summaryLabel))
 
-	stepContainers[3] = container.NewVBox(
+	stepContainers[4] = container.NewVBox(
 		makeStepHeading("Review Settings", "Click Save & Start to write the config and launch the runner."),
 		summaryBlock,
 	)
@@ -225,7 +275,7 @@ func RunWizard(configPath string) error {
 
 	// ── wiring ────────────────────────────────────────────────────────────────
 	nextBtn.OnTapped = func() {
-		if currentStep == 2 {
+		if currentStep == 3 {
 			updateSummary()
 		}
 		showStep(currentStep + 1)
@@ -235,6 +285,8 @@ func RunWizard(configPath string) error {
 	}
 
 	finishBtn.OnTapped = func() {
+		cfg.Interpreters = discoveredInterpreters // nil is fine; omitempty skips it in YAML
+
 		var paths []string
 		for _, line := range splitLines(pathsEntry.Text) {
 			if line != "" {
@@ -305,6 +357,7 @@ func RunWizard(configPath string) error {
 	))
 
 	showStep(0)
+	runDiscovery()
 	win.ShowAndRun()
 	return saveErr
 }
