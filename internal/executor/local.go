@@ -34,13 +34,14 @@ type localExecutor struct {
 	apiClient     ApprovalReporter
 	sessionAllows []string
 	mu            sync.Mutex
+	basePATH      string // sanitized once at construction, reused per job
 }
 
 func newLocalExecutor(cfg *localconfig.LocalConfig) *localExecutor {
 	if cfg == nil {
 		cfg = localconfig.Default()
 	}
-	return &localExecutor{localCfg: cfg}
+	return &localExecutor{localCfg: cfg, basePATH: buildBasePATH()}
 }
 
 // NewLocal creates a localExecutor with an optional ApprovalReporter client.
@@ -48,7 +49,7 @@ func NewLocal(cfg *localconfig.LocalConfig, client ApprovalReporter) *localExecu
 	if cfg == nil {
 		cfg = localconfig.Default()
 	}
-	return &localExecutor{localCfg: cfg, apiClient: client}
+	return &localExecutor{localCfg: cfg, apiClient: client, basePATH: buildBasePATH()}
 }
 
 // scriptFingerprint returns a hex SHA-256 fingerprint of the script.
@@ -269,22 +270,27 @@ func (e *localExecutor) needsConfirmation(script string) bool {
 	}
 }
 
-// effectivePATH returns the platform-appropriate default PATH for local scripts.
-func (e *localExecutor) effectivePATH() string {
+// buildBasePATH computes the sanitized platform PATH once at startup.
+// The warning about stripped Windows Store stubs is logged here so it appears
+// once in the runner log rather than once per job.
+func buildBasePATH() string {
 	if runtime.GOOS == "darwin" {
-		// Apple Silicon (M1/M2) Homebrew installs to /opt/homebrew; Intel uses /usr/local.
-		// Include both so scripts find Homebrew-installed tools on either architecture.
-		base := "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-		return e.prependDiscoveredDirs(base)
+		return "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 	}
 	if runtime.GOOS == "windows" {
 		raw := os.Getenv("PATH")
 		if raw == "" {
 			raw = `C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem`
 		}
-		return e.prependDiscoveredDirs(sanitizeWindowsPATH(raw))
+		return sanitizeWindowsPATH(raw)
 	}
-	return e.prependDiscoveredDirs("/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+	return "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+}
+
+// effectivePATH returns the subprocess PATH for this job: the sanitized base
+// PATH (computed once at startup) with any discovered interpreter dirs prepended.
+func (e *localExecutor) effectivePATH() string {
+	return e.prependDiscoveredDirs(e.basePATH)
 }
 
 // prependDiscoveredDirs prepends the parent directories of any configured
