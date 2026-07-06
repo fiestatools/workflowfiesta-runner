@@ -3,6 +3,8 @@
 package interpreter
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,20 +29,102 @@ func TestIsWindowsStub_DetectsStub(t *testing.T) {
 	}
 }
 
-func TestResolve_HardcodedCandidateTakesPriorityOverStub(t *testing.T) {
-	// This test verifies the resolution order: hardcoded paths are checked
-	// before LookPath, so a stub that appears in PATH is never consulted when
-	// a real binary exists at a well-known location.
-	//
-	// We can't actually install Python in a unit test, so we verify the
-	// candidate list is non-empty for each interpreter and ordered latest-first.
-	for name, paths := range candidatePaths {
+func TestStaticCandidates_NonEmptyAndNoStubs(t *testing.T) {
+	for name, paths := range staticCandidates {
 		if len(paths) == 0 {
-			t.Errorf("candidatePaths[%q] is empty — every interpreter needs at least one candidate", name)
+			t.Errorf("staticCandidates[%q] is empty — every interpreter needs at least one candidate", name)
 		}
 		for _, p := range paths {
 			if isWindowsStub(p) {
-				t.Errorf("candidatePaths[%q] contains a stub path %q — hardcoded candidates must be real binaries", name, p)
+				t.Errorf("staticCandidates[%q] contains a stub path %q", name, p)
+			}
+		}
+	}
+}
+
+// ── dynamicCandidates ─────────────────────────────────────────────────────────
+
+func TestDynamicCandidates_Python_LocalAppData(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", `C:\Users\testuser\AppData\Local`)
+	t.Setenv("PYENV_ROOT", "") // isolate — don't mix pyenv paths into this check
+
+	paths := dynamicCandidates("python3")
+
+	wantPrefix := `C:\Users\testuser\AppData\Local\Programs\Python`
+	found := false
+	for _, p := range paths {
+		if strings.HasPrefix(p, wantPrefix) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("dynamicCandidates(python3) should include paths under %q; got %v", wantPrefix, paths)
+	}
+}
+
+func TestDynamicCandidates_Python_PyenvRoot(t *testing.T) {
+	t.Setenv("PYENV_ROOT", `C:\pyenv`)
+
+	paths := dynamicCandidates("python3")
+
+	want := filepath.Join(`C:\pyenv`, "shims", "python.exe")
+	for _, p := range paths {
+		if p == want {
+			return
+		}
+	}
+	t.Errorf("dynamicCandidates(python3) should include pyenv shims path %q; got %v", want, paths)
+}
+
+func TestDynamicCandidates_Node_NvmHome(t *testing.T) {
+	t.Setenv("NVM_HOME", `C:\Users\testuser\AppData\Roaming\nvm`)
+	t.Setenv("NVM_SYMLINK", "")
+
+	paths := dynamicCandidates("node")
+
+	want := filepath.Join(`C:\Users\testuser\AppData\Roaming\nvm`, "node.exe")
+	for _, p := range paths {
+		if p == want {
+			return
+		}
+	}
+	t.Errorf("dynamicCandidates(node) should include NVM_HOME node path %q; got %v", want, paths)
+}
+
+func TestDynamicCandidates_Node_NvmSymlink(t *testing.T) {
+	t.Setenv("NVM_HOME", "")
+	t.Setenv("NVM_SYMLINK", `C:\Program Files\nodejs`)
+
+	paths := dynamicCandidates("node")
+
+	want := filepath.Join(`C:\Program Files\nodejs`, "node.exe")
+	for _, p := range paths {
+		if p == want {
+			return
+		}
+	}
+	t.Errorf("dynamicCandidates(node) should include NVM_SYMLINK node path %q; got %v", want, paths)
+}
+
+func TestDynamicCandidates_UnknownInterpreter_ReturnsEmpty(t *testing.T) {
+	for _, name := range []string{"bash", "ruby", "go"} {
+		if paths := dynamicCandidates(name); len(paths) != 0 {
+			t.Errorf("dynamicCandidates(%q) should return empty — no dynamic paths defined; got %v", name, paths)
+		}
+	}
+}
+
+func TestDynamicCandidates_NoStubPaths(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", `C:\Users\testuser\AppData\Local`)
+	t.Setenv("PYENV_ROOT", `C:\pyenv`)
+	t.Setenv("NVM_HOME", `C:\nvm`)
+	t.Setenv("NVM_SYMLINK", `C:\nodejs`)
+
+	for _, name := range []string{"python3", "python", "node"} {
+		for _, p := range dynamicCandidates(name) {
+			if isWindowsStub(p) {
+				t.Errorf("dynamicCandidates(%q) returned a stub path %q", name, p)
 			}
 		}
 	}

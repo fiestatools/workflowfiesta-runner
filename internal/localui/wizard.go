@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -81,6 +82,7 @@ func RunWizard(configPath string) error {
 	nextBtn := newButton("Next →", nil)
 	finishBtn := newButton("Save & Start", nil)
 	finishBtn.Importance = widget.HighImportance
+	finishBtn.Disable() // re-enabled when discovery completes
 
 	navRow := container.NewHBox(
 		container.NewWithoutLayout(stepLabel),
@@ -118,7 +120,10 @@ func RunWizard(configPath string) error {
 	}
 
 	// ── Step 1: Interpreter discovery ────────────────────────────────────────
-	var discoveredInterpreters map[string]string
+	var (
+		discoveredInterpreters map[string]string
+		discoveredMu           sync.Mutex
+	)
 	discoveryRows := container.NewVBox()
 	scanningLabel := canvas.NewText("Scanning for interpreters…", colorLabel)
 	scanningLabel.TextSize = 12
@@ -151,10 +156,13 @@ func RunWizard(configPath string) error {
 				detailLabel.TextSize = 11
 				rows = append(rows, container.NewVBox(nameLabel, container.NewWithoutLayout(detailLabel)))
 			}
+			discoveredMu.Lock()
 			discoveredInterpreters = found
+			discoveredMu.Unlock()
 			discoveryRows.Objects = rows
 			scanningLabel.Hide()
 			discoveryRows.Refresh()
+			finishBtn.Enable()
 		}()
 	}
 
@@ -285,7 +293,9 @@ func RunWizard(configPath string) error {
 	}
 
 	finishBtn.OnTapped = func() {
+		discoveredMu.Lock()
 		cfg.Interpreters = discoveredInterpreters // nil is fine; omitempty skips it in YAML
+		discoveredMu.Unlock()
 
 		var paths []string
 		for _, line := range splitLines(pathsEntry.Text) {

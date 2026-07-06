@@ -9,10 +9,10 @@ import (
 	"strings"
 )
 
-// candidatePaths lists well-known installation locations per interpreter name,
-// ordered by preference. The hardcoded list is checked before PATH to avoid
+// staticCandidates lists well-known system-wide installation locations per
+// interpreter name, ordered by preference. Checked before PATH to avoid
 // touching Windows Store stubs entirely.
-var candidatePaths = map[string][]string{
+var staticCandidates = map[string][]string{
 	"bash": {
 		`C:\Program Files\Git\bin\bash.exe`,
 		`C:\Program Files\Git\usr\bin\bash.exe`,
@@ -52,8 +52,57 @@ var candidatePaths = map[string][]string{
 	},
 }
 
+// dynamicCandidates builds additional interpreter paths derived from
+// environment variables, covering user-scoped installs that have no fixed
+// system-wide location (python.org user installs, pyenv-win, nvm-windows).
+func dynamicCandidates(name string) []string {
+	switch name {
+	case "python3", "python":
+		var paths []string
+		// python.org installer default user location (no admin rights required).
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			for _, ver := range []string{"313", "312", "311", "310", "39"} {
+				paths = append(paths,
+					filepath.Join(localAppData, "Programs", "Python", "Python"+ver, "python.exe"),
+				)
+			}
+		}
+		// pyenv-win: shims directory under PYENV_ROOT or default ~/.pyenv.
+		pyenvRoot := os.Getenv("PYENV_ROOT")
+		if pyenvRoot == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				pyenvRoot = filepath.Join(home, ".pyenv", "pyenv-win")
+			}
+		}
+		if pyenvRoot != "" {
+			paths = append(paths, filepath.Join(pyenvRoot, "shims", "python.exe"))
+		}
+		return paths
+
+	case "node":
+		var paths []string
+		// nvm-windows: NVM_HOME points directly to the active node version dir.
+		if nvmHome := os.Getenv("NVM_HOME"); nvmHome != "" {
+			paths = append(paths, filepath.Join(nvmHome, "node.exe"))
+		}
+		// nvm-windows symlink: NVM_SYMLINK points to the active version.
+		if nvmSymlink := os.Getenv("NVM_SYMLINK"); nvmSymlink != "" {
+			paths = append(paths, filepath.Join(nvmSymlink, "node.exe"))
+		}
+		return paths
+	}
+	return nil
+}
+
 func resolve(name string) (string, Status) {
-	for _, p := range candidatePaths[name] {
+	// Check static system-wide paths first.
+	for _, p := range staticCandidates[name] {
+		if _, err := os.Stat(p); err == nil {
+			return p, StatusFound
+		}
+	}
+	// Check dynamic env-var-derived paths (user installs, pyenv, nvm).
+	for _, p := range dynamicCandidates(name) {
 		if _, err := os.Stat(p); err == nil {
 			return p, StatusFound
 		}
