@@ -210,7 +210,7 @@ func TestClient_ReportApprovalPending(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server)
-	if err := client.ReportApprovalPending("job-pending-1", "my-runner"); err != nil {
+	if err := client.ReportApprovalPending("job-pending-1", "my-runner", false); err != nil {
 		t.Fatalf("ReportApprovalPending failed: %v", err)
 	}
 	if body["runnerName"] != "my-runner" {
