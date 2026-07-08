@@ -24,7 +24,7 @@ import (
 
 // ApprovalReporter is an optional interface for reporting approval state to the API.
 type ApprovalReporter interface {
-	ReportApprovalPending(jobID, runnerName string) error
+	ReportApprovalPending(jobID, runnerName string, infiniteTimeout bool) error
 	ReportApprovalResolved(jobID string, approved bool) error
 }
 
@@ -117,7 +117,7 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	if e.needsConfirmation(input.Script) {
 		log.Infof("[local] job %s requires approval (confirm=%s)", input.JobID, e.localCfg.Confirm)
 		if e.apiClient != nil {
-			_ = e.apiClient.ReportApprovalPending(input.JobID, e.localCfg.RunnerName)
+			_ = e.apiClient.ReportApprovalPending(input.JobID, e.localCfg.RunnerName, e.localCfg.ConfirmNeverTimeout)
 		}
 		timeout := time.Duration(e.localCfg.ConfirmTimeout) * time.Second
 		if e.localCfg.ConfirmNeverTimeout {

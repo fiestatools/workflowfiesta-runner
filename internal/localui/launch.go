@@ -273,6 +273,18 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	)
 	confirmTimeoutHint.TextSize = 10
 
+	neverTimeoutCheck := widget.NewCheck("Never timeout (wait indefinitely)", func(checked bool) {
+		if checked {
+			confirmTimeoutEntry.Disable()
+		} else {
+			confirmTimeoutEntry.Enable()
+		}
+	})
+	neverTimeoutCheck.SetChecked(cfgDefaults.ConfirmNeverTimeout)
+	if cfgDefaults.ConfirmNeverTimeout {
+		confirmTimeoutEntry.Disable()
+	}
+
 	maxTimeoutEntry := widget.NewEntry()
 	maxTimeoutEntry.SetText(strconv.Itoa(cfgDefaults.MaxTimeout))
 	maxTimeoutHint := canvas.NewText(
@@ -314,6 +326,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		makeLabeledEntryInfo("Confirm timeout (seconds)", confirmTimeoutEntry, confirmTimeoutHint, win,
 			"Confirm timeout",
 			"Number of seconds the approval dialog stays open waiting for you.\n\nIf you do not choose Allow or Deny in time, the job is treated as denied. Default: 120 seconds."),
+		neverTimeoutCheck,
 		makeLabeledEntryInfo("Max timeout (seconds)", maxTimeoutEntry, maxTimeoutHint, win,
 			"Max timeout",
 			"Maximum seconds a job is allowed to run, including script execution. The runner stops the job if it runs longer than this cap. Default: 180 seconds."),
@@ -401,6 +414,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			localCfg.EnvironmentID = regResult.EnvironmentUID
 		}
 
+		localCfg.ConfirmNeverTimeout = neverTimeoutCheck.Checked
 		if v, err := strconv.Atoi(strings.TrimSpace(confirmTimeoutEntry.Text)); err == nil && v > 0 {
 			localCfg.ConfirmTimeout = v
 		}

@@ -459,8 +459,8 @@ var runLocalCmd = &cobra.Command{
 		// Wire up the settings gear button on the status window.
 		sw.SetOnOpenSettings(func() {
 			localui.OpenSettingsWindow(localCfg, localconfig.DefaultPath(), func(updated *localconfig.LocalConfig) {
-				cfg.LocalConfig = updated
-				localCfg = updated
+				*localCfg = *updated // update in-place so the executor sees the change immediately
+				cfg.LocalConfig = localCfg
 			}, buildClearConfigurationHandler(cfg, configPath, cancel))
 		})
 		// Show before a.Run() — must be a direct call, not via fyne.Do,
@@ -579,8 +579,8 @@ func main() {
 			localCfg2 := cfg.LocalConfig
 			sw.SetOnOpenSettings(func() {
 				localui.OpenSettingsWindow(localCfg2, configPath, func(updated *localconfig.LocalConfig) {
-					cfg.LocalConfig = updated
-					localCfg2 = updated
+					*localCfg2 = *updated // update in-place so the executor sees the change immediately
+					cfg.LocalConfig = localCfg2
 				}, buildClearConfigurationHandler(cfg, configPath, cancel))
 			})
 			sw.Show()
