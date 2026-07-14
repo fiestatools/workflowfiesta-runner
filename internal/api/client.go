@@ -218,8 +218,11 @@ func (c *Client) ReportWorktreePath(jobID, worktreePath string) error {
 }
 
 // ReportApprovalPending notifies the UI that a script is awaiting approval.
-func (c *Client) ReportApprovalPending(jobID, runnerName string) error {
-	return c.post(fmt.Sprintf("/api/runner/jobs/%s/approval-pending", jobID), map[string]string{"runnerName": runnerName})
+func (c *Client) ReportApprovalPending(jobID, runnerName string, infiniteTimeout bool) error {
+	return c.post(fmt.Sprintf("/api/runner/jobs/%s/approval-pending", jobID), map[string]interface{}{
+		"runnerName":      runnerName,
+		"infiniteTimeout": infiniteTimeout,
+	})
 }
 
 // ReportApprovalResolved notifies the UI that approval was resolved.

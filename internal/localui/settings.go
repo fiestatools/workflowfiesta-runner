@@ -49,6 +49,18 @@ func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave 
 	confirmTimeoutEntry := widget.NewEntry()
 	confirmTimeoutEntry.SetText(strconv.Itoa(cfg.ConfirmTimeout))
 
+	neverTimeoutCheck := widget.NewCheck("Never timeout (wait indefinitely)", func(checked bool) {
+		if checked {
+			confirmTimeoutEntry.Disable()
+		} else {
+			confirmTimeoutEntry.Enable()
+		}
+	})
+	neverTimeoutCheck.SetChecked(cfg.ConfirmNeverTimeout)
+	if cfg.ConfirmNeverTimeout {
+		confirmTimeoutEntry.Disable()
+	}
+
 	maxTimeoutEntry := widget.NewEntry()
 	maxTimeoutEntry.SetText(strconv.Itoa(cfg.MaxTimeout))
 
@@ -57,6 +69,7 @@ func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave 
 		widget.NewLabel("Confirm mode:"),
 		confirmRadio,
 		makeLabeledEntry("Confirm timeout (seconds)", confirmTimeoutEntry),
+		neverTimeoutCheck,
 		makeLabeledEntry("Max timeout (seconds)", maxTimeoutEntry),
 	)
 
@@ -216,6 +229,7 @@ func OpenSettingsWindow(cfg *localconfig.LocalConfig, configPath string, onSave 
 		updated := *cfg
 
 		updated.Confirm = confirmMap[confirmRadio.Selected]
+		updated.ConfirmNeverTimeout = neverTimeoutCheck.Checked
 		if ct, err := strconv.Atoi(strings.TrimSpace(confirmTimeoutEntry.Text)); err == nil && ct > 0 {
 			updated.ConfirmTimeout = ct
 		}
