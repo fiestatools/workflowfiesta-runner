@@ -10,11 +10,6 @@ import (
 // TestInstallPython_NoPackageManager verifies that InstallPython emits a helpful
 // fallback message when no package manager is available instead of panicking or
 // returning a blank error.
-//
-// This test works by relying on the fact that in CI the expected package manager
-// for the current platform may not be present (e.g. winget on Linux CI).
-// It is intentionally lenient: it only checks that emit was called and the
-// error is non-nil when the install cannot proceed.
 func TestInstallPython_EmitCalledOnFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("winget may be present on Windows CI — skip to avoid side effects")
@@ -23,8 +18,6 @@ func TestInstallPython_EmitCalledOnFailure(t *testing.T) {
 	var lines []string
 	emit := func(s string) { lines = append(lines, s) }
 
-	// On a machine where brew/apt/dnf/yum may exist this test could succeed or fail.
-	// We only assert that emit was called at least once regardless of outcome.
 	_ = InstallPython(context.Background(), emit)
 
 	// The emit callback must always be called at minimum once (progress or fallback URL).

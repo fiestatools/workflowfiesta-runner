@@ -9,13 +9,10 @@ import (
 )
 
 // InstallPython installs Python using the platform-appropriate package manager.
-// Each line of output is forwarded to emit as it arrives.
-// Returns nil on success, an error if the install failed or no package manager was found.
 func InstallPython(ctx context.Context, emit func(string)) error {
 	return installPython(ctx, emit)
 }
 
-// runAndStream runs name with args, forwarding each line of combined stdout+stderr to emit.
 func runAndStream(ctx context.Context, emit func(string), name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	stdout, err := cmd.StdoutPipe()

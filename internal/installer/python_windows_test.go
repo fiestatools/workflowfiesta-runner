@@ -10,12 +10,6 @@ import (
 
 // TestInstallPython_FallsBackWhenWingetMissing verifies that InstallPython
 // takes the direct-download path when winget cannot be found on PATH.
-//
-// It hides winget by pointing PATH at an empty directory, and passes an
-// already-canceled context so runAndStream's exec.CommandContext returns
-// ctx.Err() immediately in Start(), without ever spawning powershell.exe or
-// touching the network. This confirms routing into installPythonViaDownload
-// without performing a real download or install.
 func TestInstallPython_FallsBackWhenWingetMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // empty dir — winget.LookPath fails
 

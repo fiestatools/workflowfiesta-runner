@@ -353,13 +353,11 @@ func (e *localExecutor) wrapWithLimits(script string) string {
 	return fmt.Sprintf("ulimit -t %d -v %d 2>/dev/null\n%s", cpu, memKB, script)
 }
 
-// scriptMentionsPython returns true if the script text invokes a python interpreter.
 func scriptMentionsPython(script string) bool {
 	return strings.Contains(script, "python3") || strings.Contains(script, "python ")
 }
 
-// hasPython returns true when a real Python interpreter is available — either
-// recorded in LocalConfig.Interpreters by the setup wizard, or findable on PATH.
+// hasPython returns true when a real Python interpreter is available
 func (e *localExecutor) hasPython() bool {
 	if e.localCfg.Interpreters["python3"] != "" || e.localCfg.Interpreters["python"] != "" {
 		return true

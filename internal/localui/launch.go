@@ -511,7 +511,6 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 						launchSub.Text = "Python install failed — see log above. Continuing without Python."
 						launchSub.Refresh()
 					})
-					// Leave launchInstallSection visible so the failure is not silently discarded.
 				} else {
 					fyne.Do(func() {
 						launchInstallLogText += "✓ Python installed successfully.\n"
@@ -523,7 +522,6 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 				}
 			}
 
-			// Python check done — start the runner.
 			fyne.Do(func() {
 				launchTitle.Text = "Starting runner…"
 				launchTitle.Refresh()
@@ -532,7 +530,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 				launchConnRow.Show()
 				launchConnRow.Refresh()
 
-				sw := startFn(cfg) // opens status window + tray (non-blocking)
+				sw := startFn(cfg)
 				if sw != nil {
 					if pythonWarning != "" {
 						sw.AppendLog(pythonWarning)

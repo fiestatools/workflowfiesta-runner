@@ -129,7 +129,6 @@ func RunWizard(configPath string) error {
 	scanningLabel := canvas.NewText("Scanning for interpreters…", colorLabel)
 	scanningLabel.TextSize = 12
 
-	// installSection is shown below the interpreter table when auto-install runs.
 	installStatusLabel := widget.NewLabel("")
 	var installLogText string
 	installLogLabel := widget.NewLabel("")
@@ -467,7 +466,6 @@ func hasDisplay() bool {
 	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "" || isNonLinux()
 }
 
-// hasRealPython reports whether at least one of python3/python resolved to a real binary.
 func hasRealPython(infos []interpreter.Info) bool {
 	for _, info := range infos {
 		if (info.Name == "python3" || info.Name == "python") && info.Status == interpreter.StatusFound {

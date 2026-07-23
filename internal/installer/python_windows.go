@@ -12,9 +12,6 @@ import (
 	"strings"
 )
 
-// pythonInstallerVersion is the version downloaded directly from python.org
-// when winget is unavailable. Kept in sync with the "Python.Python.3.13"
-// winget package id used in the primary install path.
 const pythonInstallerVersion = "3.13.1"
 
 func installPython(ctx context.Context, emit func(string)) error {
@@ -32,11 +29,7 @@ func installPython(ctx context.Context, emit func(string)) error {
 	return installPythonViaDownload(ctx, emit)
 }
 
-// installPythonViaDownload is the fallback used when winget is missing. It
-// downloads the official python.org installer with PowerShell's
-// Invoke-WebRequest, runs it silently for the current user, and prepends the
-// resulting install directories to PATH so the interpreter is usable in this
-// process without requiring a shell restart.
+// installPythonViaDownload is the fallback here used when winget is missing
 func installPythonViaDownload(ctx context.Context, emit func(string)) error {
 	arch := "amd64"
 	if runtime.GOARCH == "arm64" {
@@ -84,8 +77,7 @@ func installPythonViaDownload(ctx context.Context, emit func(string)) error {
 	return nil
 }
 
-// versionDirSuffix converts "3.13.1" to "313", matching python.org's
-// installer directory naming (e.g. LOCALAPPDATA\Programs\Python\Python313).
+// converts "3.13.1" to "313", matching python.org's
 func versionDirSuffix(version string) string {
 	parts := strings.SplitN(version, ".", 3)
 	if len(parts) < 2 {
