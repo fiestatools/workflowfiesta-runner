@@ -15,7 +15,7 @@ func installPython(ctx context.Context, emit func(string)) error {
 		return fmt.Errorf("winget not found")
 	}
 	return runAndStream(ctx, emit, winget,
-		"install", "--id", "Python.Python.3",
+		"install", "--id", "Python.Python.3.13",
 		"--scope", "user",
 		"--silent",
 		"--accept-package-agreements",

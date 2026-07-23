@@ -456,6 +456,10 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		}
 
 		go func() {
+			// Carried into the status window's log so it survives the wizard
+			// window auto-hiding a couple seconds after connecting.
+			var pythonWarning string
+
 			// Check for Python and auto-install if missing.
 			infos := interpreter.Discover(context.Background())
 			if !hasRealPython(infos) {
@@ -478,25 +482,45 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 					})
 				}
 
-				if installErr := installer.InstallPython(context.Background(), emit); installErr == nil {
-					// Re-probe and save discovered paths into the config.
-					recheck := interpreter.Discover(context.Background())
-					if cfg.LocalConfig.Interpreters == nil {
-						cfg.LocalConfig.Interpreters = make(map[string]string)
-					}
-					for _, info := range recheck {
-						if (info.Name == "python3" || info.Name == "python") && info.Status == interpreter.StatusFound {
-							cfg.LocalConfig.Interpreters[info.Name] = info.Path
-						}
-					}
-					// Re-save config so Interpreters is persisted for future runs.
-					_ = localconfig.Save(cfg.LocalConfig, configPath)
-				}
+				installErr := installer.InstallPython(context.Background(), emit)
 
-				fyne.Do(func() {
-					launchInstallSection.Hide()
-					launchInstallSection.Refresh()
-				})
+				// Re-probe regardless of installErr — some package managers exit
+				// non-zero on a no-op (already installed) yet Python is present.
+				recheck := interpreter.Discover(context.Background())
+				if cfg.LocalConfig.Interpreters == nil {
+					cfg.LocalConfig.Interpreters = make(map[string]string)
+				}
+				for _, info := range recheck {
+					if (info.Name == "python3" || info.Name == "python") && info.Status == interpreter.StatusFound {
+						cfg.LocalConfig.Interpreters[info.Name] = info.Path
+					}
+				}
+				// Re-save config so Interpreters is persisted for future runs.
+				_ = localconfig.Save(cfg.LocalConfig, configPath)
+
+				if installErr != nil || !hasRealPython(recheck) {
+					reason := "install failed"
+					if installErr != nil {
+						reason = installErr.Error()
+					}
+					pythonWarning = fmt.Sprintf("[runner] Python auto-install did not complete (%s) — scripts that invoke python may fail. Install manually: https://www.python.org/downloads/\n", reason)
+					fyne.Do(func() {
+						launchInstallLogText += "Python install failed — install manually then restart the runner.\n"
+						launchInstallLogLabel.SetText(launchInstallLogText)
+						launchInstallScroll.ScrollToBottom()
+						launchSub.Text = "Python install failed — see log above. Continuing without Python."
+						launchSub.Refresh()
+					})
+					// Leave launchInstallSection visible so the failure is not silently discarded.
+				} else {
+					fyne.Do(func() {
+						launchInstallLogText += "✓ Python installed successfully.\n"
+						launchInstallLogLabel.SetText(launchInstallLogText)
+						launchInstallScroll.ScrollToBottom()
+						launchInstallSection.Hide()
+						launchInstallSection.Refresh()
+					})
+				}
 			}
 
 			// Python check done — start the runner.
@@ -510,6 +534,9 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 
 				sw := startFn(cfg) // opens status window + tray (non-blocking)
 				if sw != nil {
+					if pythonWarning != "" {
+						sw.AppendLog(pythonWarning)
+					}
 					sw.SetOnAPIConnected(func() {
 						fyne.Do(func() {
 							launchTitle.Text = "Connected!"
