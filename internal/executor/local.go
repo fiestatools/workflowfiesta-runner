@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -33,13 +34,14 @@ type localExecutor struct {
 	apiClient     ApprovalReporter
 	sessionAllows []string
 	mu            sync.Mutex
+	basePATH      string // sanitized once at construction, reused per job
 }
 
 func newLocalExecutor(cfg *localconfig.LocalConfig) *localExecutor {
 	if cfg == nil {
 		cfg = localconfig.Default()
 	}
-	return &localExecutor{localCfg: cfg}
+	return &localExecutor{localCfg: cfg, basePATH: buildBasePATH()}
 }
 
 // NewLocal creates a localExecutor with an optional ApprovalReporter client.
@@ -47,7 +49,7 @@ func NewLocal(cfg *localconfig.LocalConfig, client ApprovalReporter) *localExecu
 	if cfg == nil {
 		cfg = localconfig.Default()
 	}
-	return &localExecutor{localCfg: cfg, apiClient: client}
+	return &localExecutor{localCfg: cfg, apiClient: client, basePATH: buildBasePATH()}
 }
 
 // scriptFingerprint returns a hex SHA-256 fingerprint of the script.
@@ -195,6 +197,13 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	log.Infof("[local] running job %s (timeout=%v, sandbox=%s, cwd=%s)", input.JobID, timeout, e.localCfg.Sandbox, cwd)
 	log.Debugf("[local] effective PATH: %s", e.effectivePATH())
 
+	if scriptMentionsPython(input.Script) && !e.hasPython() {
+		emit("[runner] python not found — scripts that invoke python may fail.\n" +
+			"         Windows: winget install Python.Python.3\n" +
+			"         macOS:   brew install python3\n" +
+			"         Linux:   sudo apt install python3\n")
+	}
+
 	exitCode, runErr := runWithSandbox(timeoutCtx, e.localCfg, script, env, cwd, input.OutputChan)
 
 	duration := time.Since(start).Milliseconds()
@@ -268,21 +277,52 @@ func (e *localExecutor) needsConfirmation(script string) bool {
 	}
 }
 
-// effectivePATH returns the platform-appropriate default PATH for local scripts.
-func (e *localExecutor) effectivePATH() string {
+// buildBasePATH computes the sanitized platform PATH once at startup.
+// The warning about stripped Windows Store stubs is logged here so it appears
+// once in the runner log rather than once per job.
+func buildBasePATH() string {
 	if runtime.GOOS == "darwin" {
-		// Apple Silicon (M1/M2) Homebrew installs to /opt/homebrew; Intel uses /usr/local.
-		// Include both so scripts find Homebrew-installed tools on either architecture.
 		return "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 	}
 	if runtime.GOOS == "windows" {
-		// On Windows, inherit the system PATH so scripts can find installed tools.
-		if p := os.Getenv("PATH"); p != "" {
-			return p
+		raw := os.Getenv("PATH")
+		if raw == "" {
+			raw = `C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem`
 		}
-		return `C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem`
+		return sanitizeWindowsPATH(raw)
 	}
 	return "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+}
+
+// effectivePATH returns the subprocess PATH for this job: the sanitized base
+// PATH (computed once at startup) with any discovered interpreter dirs prepended.
+func (e *localExecutor) effectivePATH() string {
+	return e.prependDiscoveredDirs(e.basePATH)
+}
+
+// prependDiscoveredDirs prepends the parent directories of any configured
+// interpreter paths to base, deduplicating entries as it goes.
+func (e *localExecutor) prependDiscoveredDirs(base string) string {
+	if len(e.localCfg.Interpreters) == 0 {
+		return base
+	}
+	seen := make(map[string]struct{})
+	var extra []string
+	for _, path := range e.localCfg.Interpreters {
+		if path == "" {
+			continue
+		}
+		dir := filepath.Dir(path)
+		if _, ok := seen[dir]; !ok {
+			seen[dir] = struct{}{}
+			extra = append(extra, dir)
+		}
+	}
+	if len(extra) == 0 {
+		return base
+	}
+	return strings.Join(extra, string(filepath.ListSeparator)) +
+		string(filepath.ListSeparator) + base
 }
 
 // buildEnv constructs a minimal, safe environment for the subprocess.
@@ -311,6 +351,20 @@ func (e *localExecutor) wrapWithLimits(script string) string {
 	// 1 GB in KB for ulimit -v
 	const memKB = 1048576
 	return fmt.Sprintf("ulimit -t %d -v %d 2>/dev/null\n%s", cpu, memKB, script)
+}
+
+func scriptMentionsPython(script string) bool {
+	return strings.Contains(script, "python3") || strings.Contains(script, "python ")
+}
+
+// hasPython returns true when a real Python interpreter is available
+func (e *localExecutor) hasPython() bool {
+	if e.localCfg.Interpreters["python3"] != "" || e.localCfg.Interpreters["python"] != "" {
+		return true
+	}
+	_, err3 := exec.LookPath("python3")
+	_, err := exec.LookPath("python")
+	return err3 == nil || err == nil
 }
 
 // writeAudit appends a JSON audit entry to the configured audit log.

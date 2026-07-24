@@ -398,6 +398,70 @@ func TestUpdateAuditLogForRunner_SpacesInNameSanitized(t *testing.T) {
 	}
 }
 
+// ── Interpreters field ────────────────────────────────────────────────────────
+
+func TestInterpreters_RoundtripsViaYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runner.yaml")
+
+	cfg := Default()
+	cfg.Interpreters = map[string]string{
+		"python3": "/usr/local/bin/python3",
+		"node":    "/usr/local/bin/node",
+	}
+	if err := Save(cfg, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(loaded.Interpreters) != 2 {
+		t.Errorf("Interpreters len = %d, want 2", len(loaded.Interpreters))
+	}
+	if loaded.Interpreters["python3"] != "/usr/local/bin/python3" {
+		t.Errorf("python3 = %q, want %q", loaded.Interpreters["python3"], "/usr/local/bin/python3")
+	}
+	if loaded.Interpreters["node"] != "/usr/local/bin/node" {
+		t.Errorf("node = %q, want %q", loaded.Interpreters["node"], "/usr/local/bin/node")
+	}
+}
+
+func TestInterpreters_OmittedFromYAMLWhenNil(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runner.yaml")
+
+	cfg := Default() // Interpreters is nil by default
+	if err := Save(cfg, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "interpreters") {
+		t.Errorf("nil Interpreters should be omitted from YAML; got:\n%s", data)
+	}
+}
+
+func TestInterpreters_LoadedAsNilWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runner.yaml")
+	yaml := "confirm: always\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Interpreters != nil {
+		t.Errorf("Interpreters should be nil when absent from YAML; got %v", cfg.Interpreters)
+	}
+}
+
 func TestDefault_DevPatternsOSAware(t *testing.T) {
 	cfg := Default()
 	hasDevPattern := false

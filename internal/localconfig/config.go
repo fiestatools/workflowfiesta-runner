@@ -121,6 +121,12 @@ type LocalConfig struct {
 	// survives restarts. Used to namespace the local script library.
 	OrgID string `yaml:"org_id,omitempty"`
 
+	// Interpreters maps canonical interpreter names (e.g. "python3", "node") to
+	// their verified absolute paths, as populated by the init-local wizard.
+	// The executor prepends their parent directories to the subprocess PATH so
+	// scripts can invoke them by name without relying on system PATH resolution.
+	Interpreters map[string]string `yaml:"interpreters,omitempty"`
+
 	// Runtime-only fields — not persisted to YAML.
 	Headless   bool   `yaml:"-"`
 	RunnerName string `yaml:"-"`

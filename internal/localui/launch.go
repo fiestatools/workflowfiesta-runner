@@ -3,6 +3,7 @@
 package localui
 
 import (
+	"context"
 	"fmt"
 	"image/color"
 	"net/url"
@@ -20,6 +21,8 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"workflowfiesta-runner/internal/config"
+	"workflowfiesta-runner/internal/installer"
+	"workflowfiesta-runner/internal/interpreter"
 	"workflowfiesta-runner/internal/localconfig"
 )
 
@@ -336,10 +339,10 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 	)
 
 	// Transition: launching (not a numbered step) — shows live connection status.
-	launchTitle := canvas.NewText("Starting runner…", colorText)
+	launchTitle := canvas.NewText("Checking environment…", colorText)
 	launchTitle.TextSize = 14
 	launchTitle.TextStyle = fyne.TextStyle{Bold: true}
-	launchSub := canvas.NewText("Connecting to WorkflowFiesta. This usually takes a few seconds.", colorMuted)
+	launchSub := canvas.NewText("Looking for Python and other required tools.", colorMuted)
 	launchSub.TextSize = 12
 	launchConnDot := canvas.NewCircle(color.NRGBA{R: 59, G: 130, B: 246, A: 255})
 	launchConnDot.StrokeWidth = 0
@@ -349,10 +352,22 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 		container.New(layout.NewGridWrapLayout(fyne.NewSize(8, 8)), launchConnDot),
 		container.NewWithoutLayout(launchConnStatus),
 	)
+	launchConnRow.Hide()
+
+	// Python install log — shown during auto-install, hidden otherwise.
+	var launchInstallLogText string
+	launchInstallLogLabel := widget.NewLabel("")
+	launchInstallLogLabel.Wrapping = fyne.TextWrapWord
+	launchInstallLogLabel.TextStyle = fyne.TextStyle{Monospace: true}
+	launchInstallScroll := container.NewVScroll(launchInstallLogLabel)
+	launchInstallScroll.SetMinSize(fyne.NewSize(0, 100))
+	launchInstallSection := container.NewVBox(launchInstallScroll)
+	launchInstallSection.Hide()
 
 	step3 := container.NewCenter(container.NewVBox(
 		container.NewWithoutLayout(launchTitle),
 		container.NewWithoutLayout(launchSub),
+		launchInstallSection,
 		container.NewPadded(launchConnRow),
 	))
 
@@ -442,7 +457,7 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			return
 		}
 
-		// Show transition screen, start runner, wait for platform connection.
+		// Show transition screen, then check/install Python before starting the runner.
 		setStep(3)
 
 		cfg := &config.Config{
@@ -453,40 +468,121 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 			ExecutorType: "local",
 			LocalConfig:  localCfg,
 		}
-		sw := startFn(cfg) // opens status window + tray (non-blocking)
-		if sw != nil {
-			sw.SetOnAPIConnected(func() {
+
+		go func() {
+			// Carried into the status window's log so it survives the wizard
+			// window auto-hiding a couple seconds after connecting.
+			var pythonWarning string
+
+			// Check for Python and auto-install if missing.
+			infos := interpreter.Discover(context.Background())
+			if !hasRealPython(infos) {
 				fyne.Do(func() {
-					launchTitle.Text = "Connected!"
+					launchTitle.Text = "Installing Python…"
 					launchTitle.Refresh()
-					launchSub.Text = "Your runner is online and ready to receive jobs."
+					launchSub.Text = "Python is required for script steps. Installing now."
 					launchSub.Refresh()
-					launchConnDot.FillColor = colorSuccess
-					canvas.Refresh(launchConnDot)
-					launchConnStatus.Text = "✓ Connected to WorkflowFiesta"
-					launchConnStatus.Color = colorSuccess
-					launchConnStatus.Refresh()
-					time.AfterFunc(2*time.Second, func() {
-						fyne.Do(win.Hide)
+					launchInstallLogText = ""
+					launchInstallLogLabel.SetText("")
+					launchInstallSection.Show()
+					launchInstallSection.Refresh()
+				})
+
+				emit := func(line string) {
+					fyne.Do(func() {
+						launchInstallLogText += line + "\n"
+						launchInstallLogLabel.SetText(launchInstallLogText)
+						launchInstallScroll.ScrollToBottom()
 					})
-				})
-			})
-			go func() {
-				time.Sleep(90 * time.Second)
-				fyne.Do(func() {
-					if sw.APIConnected() || currentStep != 3 {
-						return
+				}
+
+				installErr := installer.InstallPython(context.Background(), emit)
+
+				// Re-probe regardless of installErr — some package managers exit
+				// non-zero on a no-op (already installed) yet Python is present.
+				recheck := interpreter.Discover(context.Background())
+				if cfg.LocalConfig.Interpreters == nil {
+					cfg.LocalConfig.Interpreters = make(map[string]string)
+				}
+				for _, info := range recheck {
+					if (info.Name == "python3" || info.Name == "python") && info.Status == interpreter.StatusFound {
+						cfg.LocalConfig.Interpreters[info.Name] = info.Path
 					}
-					launchSub.Text = "Still connecting. Check your network and API URL in the status window."
-					launchSub.Refresh()
-					launchConnStatus.Text = "Connection is taking longer than expected"
-					launchConnStatus.Color = colorAmber
-					launchConnStatus.Refresh()
-				})
-			}()
-		} else {
-			win.Hide()
-		}
+				}
+				// Re-save config so Interpreters is persisted for future runs.
+				_ = localconfig.Save(cfg.LocalConfig, configPath)
+
+				if installErr != nil || !hasRealPython(recheck) {
+					reason := "install failed"
+					if installErr != nil {
+						reason = installErr.Error()
+					}
+					pythonWarning = fmt.Sprintf("[runner] Python auto-install did not complete (%s) — scripts that invoke python may fail. Install manually: https://www.python.org/downloads/\n", reason)
+					fyne.Do(func() {
+						launchInstallLogText += "Python install failed — install manually then restart the runner.\n"
+						launchInstallLogLabel.SetText(launchInstallLogText)
+						launchInstallScroll.ScrollToBottom()
+						launchSub.Text = "Python install failed — see log above. Continuing without Python."
+						launchSub.Refresh()
+					})
+				} else {
+					fyne.Do(func() {
+						launchInstallLogText += "✓ Python installed successfully.\n"
+						launchInstallLogLabel.SetText(launchInstallLogText)
+						launchInstallScroll.ScrollToBottom()
+						launchInstallSection.Hide()
+						launchInstallSection.Refresh()
+					})
+				}
+			}
+
+			fyne.Do(func() {
+				launchTitle.Text = "Starting runner…"
+				launchTitle.Refresh()
+				launchSub.Text = "Connecting to WorkflowFiesta. This usually takes a few seconds."
+				launchSub.Refresh()
+				launchConnRow.Show()
+				launchConnRow.Refresh()
+
+				sw := startFn(cfg)
+				if sw != nil {
+					if pythonWarning != "" {
+						sw.AppendLog(pythonWarning)
+					}
+					sw.SetOnAPIConnected(func() {
+						fyne.Do(func() {
+							launchTitle.Text = "Connected!"
+							launchTitle.Refresh()
+							launchSub.Text = "Your runner is online and ready to receive jobs."
+							launchSub.Refresh()
+							launchConnDot.FillColor = colorSuccess
+							canvas.Refresh(launchConnDot)
+							launchConnStatus.Text = "✓ Connected to WorkflowFiesta"
+							launchConnStatus.Color = colorSuccess
+							launchConnStatus.Refresh()
+							time.AfterFunc(2*time.Second, func() {
+								fyne.Do(win.Hide)
+							})
+						})
+					})
+					go func() {
+						time.Sleep(90 * time.Second)
+						fyne.Do(func() {
+							if sw.APIConnected() || currentStep != 3 {
+								return
+							}
+							launchSub.Text = "Still connecting. Check your network and API URL in the status window."
+							launchSub.Refresh()
+							launchConnStatus.Text = "Connection is taking longer than expected"
+							launchConnStatus.Color = colorAmber
+							launchConnStatus.Refresh()
+						})
+					}()
+				} else {
+					win.Hide()
+				}
+			})
+		}()
 	}
 
 	// ── layout ────────────────────────────────────────────────────────────────
