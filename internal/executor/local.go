@@ -197,6 +197,13 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	log.Infof("[local] running job %s (timeout=%v, sandbox=%s, cwd=%s)", input.JobID, timeout, e.localCfg.Sandbox, cwd)
 	log.Debugf("[local] effective PATH: %s", e.effectivePATH())
 
+	if scriptMentionsPython(input.Script) && !e.hasPython() {
+		emit("[runner] python not found — scripts that invoke python may fail.\n" +
+			"         Windows: winget install Python.Python.3\n" +
+			"         macOS:   brew install python3\n" +
+			"         Linux:   sudo apt install python3\n")
+	}
+
 	exitCode, runErr := runWithSandbox(timeoutCtx, e.localCfg, script, env, cwd, input.OutputChan)
 
 	duration := time.Since(start).Milliseconds()
@@ -344,6 +351,20 @@ func (e *localExecutor) wrapWithLimits(script string) string {
 	// 1 GB in KB for ulimit -v
 	const memKB = 1048576
 	return fmt.Sprintf("ulimit -t %d -v %d 2>/dev/null\n%s", cpu, memKB, script)
+}
+
+func scriptMentionsPython(script string) bool {
+	return strings.Contains(script, "python3") || strings.Contains(script, "python ")
+}
+
+// hasPython returns true when a real Python interpreter is available
+func (e *localExecutor) hasPython() bool {
+	if e.localCfg.Interpreters["python3"] != "" || e.localCfg.Interpreters["python"] != "" {
+		return true
+	}
+	_, err3 := exec.LookPath("python3")
+	_, err := exec.LookPath("python")
+	return err3 == nil || err == nil
 }
 
 // writeAudit appends a JSON audit entry to the configured audit log.

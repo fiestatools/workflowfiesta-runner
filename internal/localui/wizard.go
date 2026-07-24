@@ -18,6 +18,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
+	"workflowfiesta-runner/internal/installer"
 	"workflowfiesta-runner/internal/interpreter"
 	"workflowfiesta-runner/internal/localconfig"
 )
@@ -128,41 +129,110 @@ func RunWizard(configPath string) error {
 	scanningLabel := canvas.NewText("Scanning for interpreters…", colorLabel)
 	scanningLabel.TextSize = 12
 
+	installStatusLabel := widget.NewLabel("")
+	var installLogText string
+	installLogLabel := widget.NewLabel("")
+	installLogLabel.Wrapping = fyne.TextWrapWord
+	installLogLabel.TextStyle = fyne.TextStyle{Monospace: true}
+	installLogScroll := container.NewVScroll(installLogLabel)
+	installLogScroll.SetMinSize(fyne.NewSize(0, 100))
+	installSection := container.NewVBox(
+		widget.NewSeparator(),
+		installStatusLabel,
+		installLogScroll,
+	)
+	installSection.Hide()
+
+	buildRows := func(infos []interpreter.Info, found map[string]string) []fyne.CanvasObject {
+		rows := make([]fyne.CanvasObject, 0, len(infos))
+		for _, info := range infos {
+			var icon, detail string
+			switch info.Status {
+			case interpreter.StatusFound:
+				icon = "✓"
+				detail = info.Path
+				if info.Version != "" {
+					detail += "   (" + info.Version + ")"
+				}
+				found[info.Name] = info.Path
+			case interpreter.StatusStub:
+				icon = "⚠"
+				detail = "Windows Store stub — skipped"
+			default:
+				icon = "✗"
+				detail = "not found"
+			}
+			nameLabel := widget.NewLabel(icon + "  " + info.Name)
+			nameLabel.TextStyle = fyne.TextStyle{Monospace: true}
+			detailLabel := canvas.NewText(detail, colorLabel)
+			detailLabel.TextSize = 11
+			rows = append(rows, container.NewVBox(nameLabel, container.NewWithoutLayout(detailLabel)))
+		}
+		return rows
+	}
+
 	runDiscovery := func() {
 		go func() {
 			infos := interpreter.Discover(context.Background())
 			found := make(map[string]string)
-			rows := make([]fyne.CanvasObject, 0, len(infos))
-			for _, info := range infos {
-				var icon, detail string
-				switch info.Status {
-				case interpreter.StatusFound:
-					icon = "✓"
-					detail = info.Path
-					if info.Version != "" {
-						detail += "   (" + info.Version + ")"
-					}
-					found[info.Name] = info.Path
-				case interpreter.StatusStub:
-					icon = "⚠"
-					detail = "Windows Store stub — skipped"
-				default:
-					icon = "✗"
-					detail = "not found"
-				}
-				nameLabel := widget.NewLabel(icon + "  " + info.Name)
-				nameLabel.TextStyle = fyne.TextStyle{Monospace: true}
-				detailLabel := canvas.NewText(detail, colorLabel)
-				detailLabel.TextSize = 11
-				rows = append(rows, container.NewVBox(nameLabel, container.NewWithoutLayout(detailLabel)))
-			}
+			rows := buildRows(infos, found)
+
 			discoveredMu.Lock()
 			discoveredInterpreters = found
 			discoveredMu.Unlock()
-			discoveryRows.Objects = rows
-			scanningLabel.Hide()
-			discoveryRows.Refresh()
-			finishBtn.Enable()
+
+			fyne.Do(func() {
+				discoveryRows.Objects = rows
+				scanningLabel.Hide()
+				discoveryRows.Refresh()
+			})
+
+			if hasRealPython(infos) {
+				fyne.Do(func() { finishBtn.Enable() })
+				return
+			}
+
+			// Python missing — auto-install.
+			fyne.Do(func() {
+				installStatusLabel.SetText("Python not found — installing…")
+				installLogText = ""
+				installLogLabel.SetText("")
+				installSection.Show()
+				installSection.Refresh()
+			})
+
+			emit := func(line string) {
+				fyne.Do(func() {
+					installLogText += line + "\n"
+					installLogLabel.SetText(installLogText)
+					installLogScroll.ScrollToBottom()
+				})
+			}
+
+			installErr := installer.InstallPython(context.Background(), emit)
+
+			// Re-probe to pick up the newly installed binary.
+			recheck := interpreter.Discover(context.Background())
+			recheckFound := make(map[string]string)
+			recheckRows := buildRows(recheck, recheckFound)
+
+			discoveredMu.Lock()
+			for k, v := range recheckFound {
+				discoveredInterpreters[k] = v
+			}
+			discoveredMu.Unlock()
+
+			fyne.Do(func() {
+				discoveryRows.Objects = recheckRows
+				discoveryRows.Refresh()
+				if installErr != nil || !hasRealPython(recheck) {
+					installStatusLabel.SetText("Python install failed — install manually then re-run setup.")
+				} else {
+					installStatusLabel.SetText("✓ Python installed successfully.")
+				}
+				installStatusLabel.Refresh()
+				finishBtn.Enable()
+			})
 		}()
 	}
 
@@ -171,6 +241,7 @@ func RunWizard(configPath string) error {
 			"Scanning for installed interpreters. Verified paths are saved to runner.yaml\nand prepended to the subprocess PATH at runtime."),
 		scanningLabel,
 		discoveryRows,
+		installSection,
 	)
 
 	// ── Step 2: Folder access ─────────────────────────────────────────────────
@@ -393,4 +464,13 @@ func makeLabeledEntryWithHint(label string, entry *widget.Entry, hint *canvas.Te
 // hasDisplay returns false when running on Linux without a display server.
 func hasDisplay() bool {
 	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "" || isNonLinux()
+}
+
+func hasRealPython(infos []interpreter.Info) bool {
+	for _, info := range infos {
+		if (info.Name == "python3" || info.Name == "python") && info.Status == interpreter.StatusFound {
+			return true
+		}
+	}
+	return false
 }
