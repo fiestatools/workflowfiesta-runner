@@ -95,6 +95,20 @@ func dynamicCandidates(name string) []string {
 }
 
 func resolve(name string) (string, Status) {
+	path, status := resolveDirect(name)
+	if status != StatusFound {
+		return path, status
+	}
+	// Windows has no python3.exe, so alias the discovered python.exe to that name.
+	if name == "python3" && !strings.EqualFold(filepath.Base(path), "python3.exe") {
+		if shimPath, err := ensureShim("python3", path); err == nil {
+			return shimPath, StatusFound
+		}
+	}
+	return path, status
+}
+
+func resolveDirect(name string) (string, Status) {
 	// Check static system-wide paths first.
 	for _, p := range staticCandidates[name] {
 		if _, err := os.Stat(p); err == nil {
