@@ -8,9 +8,6 @@ import (
 	"path/filepath"
 )
 
-// shimDir returns (creating if needed) the directory used to store generated
-// interpreter shims, e.g. python3.exe when only python.exe exists on this
-// machine.
 func shimDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -35,13 +32,13 @@ func ensureShim(name, targetExe string) (string, error) {
 		if targetInfo, targetErr := os.Stat(targetExe); targetErr == nil && os.SameFile(shimInfo, targetInfo) {
 			return shimPath, nil // already correct
 		}
-		os.Remove(shimPath) // stale — e.g. Python was reinstalled to a new location
+		os.Remove(shimPath)
 	}
 
 	if err := os.Link(targetExe, shimPath); err == nil {
 		return shimPath, nil
 	}
-	// Cross-volume, or hardlinks unsupported on this filesystem — fall back to a copy.
+	// Cross-volume, or hardlinks unsupported on this filesystem, fall back to a copy.
 	if err := copyFile(targetExe, shimPath); err != nil {
 		return "", err
 	}
