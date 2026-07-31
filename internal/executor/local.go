@@ -19,6 +19,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"workflowfiesta-runner/internal/auditlog"
+	"workflowfiesta-runner/internal/interpreter"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/localui"
 )
@@ -176,6 +177,11 @@ func (e *localExecutor) Execute(ctx context.Context, input Input) (int, error) {
 		timeout = maxTimeout
 	}
 
+	// Windows has no python3.exe, so a bare `python3` call fails without a shim.
+	if runtime.GOOS == "windows" && scriptMentionsPython(input.Script) {
+		e.ensureWindowsPythonShim()
+	}
+
 	// Layer 3: Build minimal environment.
 	env := e.buildEnv(input.EnvVars)
 
@@ -303,12 +309,19 @@ func (e *localExecutor) effectivePATH() string {
 // prependDiscoveredDirs prepends the parent directories of any configured
 // interpreter paths to base, deduplicating entries as it goes.
 func (e *localExecutor) prependDiscoveredDirs(base string) string {
-	if len(e.localCfg.Interpreters) == 0 {
+	e.mu.Lock()
+	interpreters := make(map[string]string, len(e.localCfg.Interpreters))
+	for k, v := range e.localCfg.Interpreters {
+		interpreters[k] = v
+	}
+	e.mu.Unlock()
+
+	if len(interpreters) == 0 {
 		return base
 	}
 	seen := make(map[string]struct{})
 	var extra []string
-	for _, path := range e.localCfg.Interpreters {
+	for _, path := range interpreters {
 		if path == "" {
 			continue
 		}
@@ -357,9 +370,32 @@ func scriptMentionsPython(script string) bool {
 	return strings.Contains(script, "python3") || strings.Contains(script, "python ")
 }
 
+func (e *localExecutor) ensureWindowsPythonShim() {
+	e.mu.Lock()
+	already := e.localCfg.Interpreters["python3"] != ""
+	e.mu.Unlock()
+	if already {
+		return
+	}
+
+	shimPath, ok := interpreter.EnsurePython3Shim()
+	if !ok {
+		return
+	}
+	e.mu.Lock()
+	if e.localCfg.Interpreters == nil {
+		e.localCfg.Interpreters = make(map[string]string)
+	}
+	e.localCfg.Interpreters["python3"] = shimPath
+	e.mu.Unlock()
+}
+
 // hasPython returns true when a real Python interpreter is available
 func (e *localExecutor) hasPython() bool {
-	if e.localCfg.Interpreters["python3"] != "" || e.localCfg.Interpreters["python"] != "" {
+	e.mu.Lock()
+	configured := e.localCfg.Interpreters["python3"] != "" || e.localCfg.Interpreters["python"] != ""
+	e.mu.Unlock()
+	if configured {
 		return true
 	}
 	_, err3 := exec.LookPath("python3")
