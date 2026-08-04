@@ -99,6 +99,10 @@ cask "workflowfiesta-runner" do
   depends_on :macos
 
   app "WorkflowFiesta Runner.app"
+
+  zap trash: [
+    "~/.workflowfiesta",
+  ]
 end
 RUBY
 
