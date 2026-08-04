@@ -51,7 +51,6 @@ cat > "$outdir/Formula/workflowfiesta-runner.rb" <<RUBY
 class WorkflowfiestaRunner < Formula
   desc "Self-hosted runner for WorkflowFiesta workflows"
   homepage "https://github.com/${repo}"
-  version "${version}"
   license :cannot_represent
 
   on_macos do
@@ -65,8 +64,10 @@ class WorkflowfiestaRunner < Formula
   end
 
   on_linux do
-    url "${base_url}/workflowfiesta-runner-linux-amd64"
-    sha256 "${linux_amd64_sha}"
+    on_intel do
+      url "${base_url}/workflowfiesta-runner-linux-amd64"
+      sha256 "${linux_amd64_sha}"
+    end
   end
 
   def install
@@ -94,6 +95,8 @@ cask "workflowfiesta-runner" do
   name "WorkflowFiesta Runner"
   desc "Desktop GUI for the WorkflowFiesta self-hosted runner"
   homepage "https://github.com/${repo}"
+
+  depends_on :macos
 
   app "WorkflowFiesta Runner.app"
 end

@@ -184,6 +184,7 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: darwin
           GOARCH: arm64
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
         run: |
           go build \
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
@@ -225,6 +226,7 @@ jobs:
           GOARCH: amd64
           CC: "clang -arch x86_64"
           CXX: "clang++ -arch x86_64"
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
         run: |
           go build \
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
@@ -397,8 +399,9 @@ jobs:
             if [ -d "$target" ]; then
               xcrun stapler staple "$target"
               rm "dist/${name}.zip"
-              (cd dist && zip -r -y "${name}.zip" "$name")
-              rm -rf "$target"
+              mv "$target" "dist/WorkflowFiesta Runner.app"
+              (cd dist && zip -r -y "${name}.zip" "WorkflowFiesta Runner.app")
+              rm -rf "dist/WorkflowFiesta Runner.app"
             else
               rm "dist/${name}.zip"
             fi
