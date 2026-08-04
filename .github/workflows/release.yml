@@ -202,10 +202,12 @@ jobs:
           # Tray-only app: no Dock icon / app-switcher entry.
           plutil -insert LSUIElement -bool true \
             workflowfiesta-runner-darwin-arm64-gui.app/Contents/Info.plist
+          mkdir -p artifact-stage
+          mv workflowfiesta-runner-darwin-arm64-gui.app artifact-stage/
       - uses: actions/upload-artifact@v4
         with:
           name: darwin-gui-arm64
-          path: workflowfiesta-runner-darwin-arm64-gui.app
+          path: artifact-stage
 
   build-darwin-gui-amd64:
     name: macOS GUI (amd64 / Intel)
@@ -241,10 +243,12 @@ jobs:
           # Tray-only app: no Dock icon / app-switcher entry.
           plutil -insert LSUIElement -bool true \
             workflowfiesta-runner-darwin-amd64-gui.app/Contents/Info.plist
+          mkdir -p artifact-stage
+          mv workflowfiesta-runner-darwin-amd64-gui.app artifact-stage/
       - uses: actions/upload-artifact@v4
         with:
           name: darwin-gui-amd64
-          path: workflowfiesta-runner-darwin-amd64-gui.app
+          path: artifact-stage
 
   # Code signing
   # Sign Windows binaries with SSL.com cloud-hosted certificate (CodeSignTool)
