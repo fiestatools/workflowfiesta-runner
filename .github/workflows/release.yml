@@ -189,10 +189,23 @@ jobs:
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
             -o workflowfiesta-runner-darwin-arm64-gui \
             ./cmd/runner
+      - name: Package into .app bundle
+        run: |
+          go install fyne.io/fyne/v2/cmd/fyne@latest
+          fyne package -os darwin \
+            -icon internal/localui/assets/icon.png \
+            -name "WorkflowFiesta Runner" \
+            -appID com.fiestatools.workflowfiesta-runner \
+            -exe workflowfiesta-runner-darwin-arm64-gui \
+            -appVersion "$(echo '${{ github.ref_name }}' | sed 's/^v//')"
+          mv "WorkflowFiesta Runner.app" workflowfiesta-runner-darwin-arm64-gui.app
+          # Tray-only app: no Dock icon / app-switcher entry.
+          plutil -insert LSUIElement -bool true \
+            workflowfiesta-runner-darwin-arm64-gui.app/Contents/Info.plist
       - uses: actions/upload-artifact@v4
         with:
           name: darwin-gui-arm64
-          path: workflowfiesta-runner-darwin-arm64-gui
+          path: workflowfiesta-runner-darwin-arm64-gui.app
 
   build-darwin-gui-amd64:
     name: macOS GUI (amd64 / Intel)
@@ -215,10 +228,23 @@ jobs:
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
             -o workflowfiesta-runner-darwin-amd64-gui \
             ./cmd/runner
+      - name: Package into .app bundle
+        run: |
+          go install fyne.io/fyne/v2/cmd/fyne@latest
+          fyne package -os darwin \
+            -icon internal/localui/assets/icon.png \
+            -name "WorkflowFiesta Runner" \
+            -appID com.fiestatools.workflowfiesta-runner \
+            -exe workflowfiesta-runner-darwin-amd64-gui \
+            -appVersion "$(echo '${{ github.ref_name }}' | sed 's/^v//')"
+          mv "WorkflowFiesta Runner.app" workflowfiesta-runner-darwin-amd64-gui.app
+          # Tray-only app: no Dock icon / app-switcher entry.
+          plutil -insert LSUIElement -bool true \
+            workflowfiesta-runner-darwin-amd64-gui.app/Contents/Info.plist
       - uses: actions/upload-artifact@v4
         with:
           name: darwin-gui-amd64
-          path: workflowfiesta-runner-darwin-amd64-gui
+          path: workflowfiesta-runner-darwin-amd64-gui.app
 
   # Code signing
   # Sign Windows binaries with SSL.com cloud-hosted certificate (CodeSignTool)
@@ -326,15 +352,17 @@ jobs:
 
       - name: Sign binaries
         run: |
-          for bin in dist/workflowfiesta-runner-darwin-*; do
-            [ -f "$bin" ] || continue
-            echo "Signing $(basename "$bin")..."
-            codesign --force --options runtime \
+          for target in dist/workflowfiesta-runner-darwin-*; do
+            [ -e "$target" ] || continue
+            echo "Signing $(basename "$target")..."
+            deep_flag=()
+            [ -d "$target" ] && deep_flag=(--deep)
+            codesign --force "${deep_flag[@]}" --options runtime \
               --entitlements build/entitlements.mac.plist \
               --sign "$SIGNING_IDENTITY" \
               --timestamp \
-              "$bin"
-            codesign --verify --verbose "$bin"
+              "$target"
+            codesign --verify "${deep_flag[@]}" --verbose "$target"
           done
 
       - name: Prep notarization API key
@@ -350,17 +378,26 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.apple_api_key_id }}
           APPLE_API_KEY_ISSUER: ${{ secrets.apple_api_key_issuer_id }}
         run: |
-          for bin in dist/workflowfiesta-runner-darwin-*; do
-            [ -f "$bin" ] || continue
-            name="$(basename "$bin")"
+          for target in dist/workflowfiesta-runner-darwin-*; do
+            [ -e "$target" ] || continue
+            name="$(basename "$target")"
             echo "Notarizing $name..."
-            zip "${bin}.zip" "$bin"
-            xcrun notarytool submit "${bin}.zip" \
+            (cd dist && zip -r -y "${name}.zip" "$name")
+            xcrun notarytool submit "dist/${name}.zip" \
               --key ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
               --key-id "$APPLE_API_KEY_ID" \
               --issuer "$APPLE_API_KEY_ISSUER" \
               --wait
-            rm "${bin}.zip"
+
+            # Only .app bundles can be stapled; bare binaries can't.
+            if [ -d "$target" ]; then
+              xcrun stapler staple "$target"
+              rm "dist/${name}.zip"
+              (cd dist && zip -r -y "${name}.zip" "$name")
+              rm -rf "$target"
+            else
+              rm "dist/${name}.zip"
+            fi
           done
 
       - uses: actions/upload-artifact@v4

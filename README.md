@@ -27,9 +27,9 @@ Pre-built binaries are published on the [releases page](https://github.com/testf
 
 | Platform | Variant | Filename |
 |---|---|---|
-| macOS Apple Silicon (arm64) | GUI | `workflowfiesta-runner-darwin-arm64-gui` |
+| macOS Apple Silicon (arm64) | GUI | `workflowfiesta-runner-darwin-arm64-gui.app.zip` |
 | macOS Apple Silicon (arm64) | Headless | `workflowfiesta-runner-darwin-arm64` |
-| macOS Intel (amd64) | GUI | `workflowfiesta-runner-darwin-amd64-gui` |
+| macOS Intel (amd64) | GUI | `workflowfiesta-runner-darwin-amd64-gui.app.zip` |
 | macOS Intel (amd64) | Headless | `workflowfiesta-runner-darwin-amd64` |
 | Linux x86-64 | GUI | `workflowfiesta-runner-linux-amd64-gui` |
 | Linux x86-64 | Headless | `workflowfiesta-runner-linux-amd64` |
@@ -37,6 +37,8 @@ Pre-built binaries are published on the [releases page](https://github.com/testf
 | Windows x86-64 | Headless | `workflowfiesta-runner-windows-amd64.exe` |
 
 > **GUI vs Headless:** GUI builds include a desktop wizard and system-tray icon (requires a display). Headless builds have no GUI dependencies and are ideal for servers and CI.
+
+> **macOS GUI:** ships as a signed, notarized `WorkflowFiesta Runner.app`, zipped. Unzip and drag it into `/Applications` — it opens straight away, no Gatekeeper workaround needed.
 
 ```sh
 # Linux amd64 example
