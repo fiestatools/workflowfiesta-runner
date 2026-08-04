@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 # Generates a Homebrew Formula (headless) and Cask (GUI) for a given release.
 # Usage: generate-homebrew-files.sh <version> <output-dir>
-#
-# Checksum resolution per asset, in order: an env var override (e.g.
-# DARWIN_ARM64_SHA256), then the release's checksums.txt. Mirrors
-# workflowfiesta-cli's scripts/generate-homebrew-formula.ts.
 set -euo pipefail
 
 version="${1:?Usage: generate-homebrew-files.sh <version> <output-dir>}"
@@ -14,10 +10,6 @@ outdir="${2:?Usage: generate-homebrew-files.sh <version> <output-dir>}"
 repo="fiestatools/workflowfiesta-runner"
 base_url="https://github.com/${repo}/releases/download/v${version}"
 
-# sha_for is called as `$(sha_for ...)`, which runs it in a subshell — any
-# variable it wrote to would be lost once that subshell exits. So the fetch
-# has to happen once here, at top level, before any subshell calls exist;
-# sha_for only ever reads $checksums, never writes it.
 required_envs=(DARWIN_ARM64_SHA256 DARWIN_AMD64_SHA256 LINUX_AMD64_SHA256 GUI_ARM64_SHA256 GUI_AMD64_SHA256)
 need_fetch=false
 for e in "${required_envs[@]}"; do
