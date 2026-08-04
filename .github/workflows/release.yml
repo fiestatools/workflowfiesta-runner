@@ -457,3 +457,74 @@ jobs:
         with:
           files: dist/*
           fail_on_unmatched_files: false
+
+  update-homebrew:
+    name: Update Homebrew tap
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Homebrew files and open tap PR
+        env:
+          GH_TOKEN: ${{ secrets.GH_CI_TOKEN || github.token }}
+        run: |
+          version="${{ github.ref_name }}"
+          version="${version#v}"
+          branch="update-workflowfiesta-runner-v${version}"
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+          mkdir -p generated
+          ./scripts/generate-homebrew-files.sh "$version" generated
+
+          existing_formula=$(gh api repos/fiestatools/homebrew-tap/contents/Formula/workflowfiesta-runner.rb --jq '.content' 2>/dev/null | base64 -d || echo "")
+          existing_cask=$(gh api repos/fiestatools/homebrew-tap/contents/Casks/workflowfiesta-runner.rb --jq '.content' 2>/dev/null | base64 -d || echo "")
+          new_formula=$(cat generated/Formula/workflowfiesta-runner.rb)
+          new_cask=$(cat generated/Casks/workflowfiesta-runner.rb)
+
+          if [ "$existing_formula" = "$new_formula" ] && [ "$existing_cask" = "$new_cask" ]; then
+            echo "No changes to Homebrew formula/cask"
+            exit 0
+          fi
+
+          gh repo clone fiestatools/homebrew-tap homebrew-tap
+          cd homebrew-tap
+          git checkout -b "$branch"
+
+          mkdir -p Formula Casks
+          cp ../generated/Formula/workflowfiesta-runner.rb Formula/workflowfiesta-runner.rb
+          cp ../generated/Casks/workflowfiesta-runner.rb Casks/workflowfiesta-runner.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/workflowfiesta-runner.rb Casks/workflowfiesta-runner.rb
+          git commit -m "Update workflowfiesta-runner to v${version}"
+          git push origin "$branch"
+
+          pr_url=$(gh pr create \
+            --title "Update workflowfiesta-runner to v${version}" \
+            --body "Automated update of the workflowfiesta-runner formula and cask to version ${version}. Created by [release workflow](https://github.com/fiestatools/workflowfiesta-runner/actions/runs/${{ github.run_id }})." \
+            --base main \
+            --head "$branch")
+
+          echo "PR_URL=$pr_url" >> "$GITHUB_ENV"
+          echo "Created PR: $pr_url"
+
+      - name: Summary
+        run: |
+          if [ -n "${{ env.PR_URL }}" ]; then
+            echo "## Homebrew Tap PR Created" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "PR created for v${VERSION}: ${{ env.PR_URL }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Once merged, install with:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "brew install fiestatools/tap/workflowfiesta-runner" >> $GITHUB_STEP_SUMMARY
+            echo "brew install --cask fiestatools/tap/workflowfiesta-runner" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Homebrew Tap" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No changes to the Homebrew formula/cask for v${VERSION} — nothing to open a PR for." >> $GITHUB_STEP_SUMMARY
+          fi
