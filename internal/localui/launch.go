@@ -536,6 +536,65 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 				}
 			}
 
+			var bashWarning string
+			if !hasRealBash(infos) {
+				fyne.Do(func() {
+					launchTitle.Text = "Installing Git for Windows…"
+					launchTitle.Refresh()
+					launchSub.Text = "A real bash is required to run job scripts. Installing now."
+					launchSub.Refresh()
+					launchInstallLogText = ""
+					launchInstallLogLabel.SetText("")
+					launchInstallSection.Show()
+					launchInstallSection.Refresh()
+				})
+
+				emit := func(line string) {
+					fyne.Do(func() {
+						launchInstallLogText += line + "\n"
+						launchInstallLogLabel.SetText(launchInstallLogText)
+						launchInstallScroll.ScrollToBottom()
+					})
+				}
+
+				installErr := installer.InstallGitBash(context.Background(), emit)
+
+				recheck := interpreter.Discover(context.Background())
+				if cfg.LocalConfig.Interpreters == nil {
+					cfg.LocalConfig.Interpreters = make(map[string]string)
+				}
+				for _, info := range recheck {
+					if info.Name == "bash" && info.Status == interpreter.StatusFound {
+						cfg.LocalConfig.Interpreters[info.Name] = info.Path
+					}
+				}
+				// Re-save config so Interpreters is persisted for future runs.
+				_ = localconfig.Save(cfg.LocalConfig, configPath)
+
+				if installErr != nil || !hasRealBash(recheck) {
+					reason := "install failed"
+					if installErr != nil {
+						reason = installErr.Error()
+					}
+					bashWarning = fmt.Sprintf("[runner] bash auto-install did not complete (%s) — job scripts will fail to run. Install manually: https://git-scm.com/download/win\n", reason)
+					fyne.Do(func() {
+						launchInstallLogText += "Git for Windows install failed — install manually then restart the runner.\n"
+						launchInstallLogLabel.SetText(launchInstallLogText)
+						launchInstallScroll.ScrollToBottom()
+						launchSub.Text = "Git for Windows install failed — see log above. Continuing without bash."
+						launchSub.Refresh()
+					})
+				} else {
+					fyne.Do(func() {
+						launchInstallLogText += "✓ Git for Windows installed successfully.\n"
+						launchInstallLogLabel.SetText(launchInstallLogText)
+						launchInstallScroll.ScrollToBottom()
+						launchInstallSection.Hide()
+						launchInstallSection.Refresh()
+					})
+				}
+			}
+
 			fyne.Do(func() {
 				launchTitle.Text = "Starting runner…"
 				launchTitle.Refresh()
@@ -548,6 +607,9 @@ func showFirstRunWizard(a fyne.App, configPath string, startFn func(*config.Conf
 				if sw != nil {
 					if pythonWarning != "" {
 						sw.AppendLog(pythonWarning)
+					}
+					if bashWarning != "" {
+						sw.AppendLog(bashWarning)
 					}
 					sw.SetOnAPIConnected(func() {
 						fyne.Do(func() {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"fyne.io/fyne/v2"
@@ -130,6 +131,7 @@ func RunWizard(configPath string) error {
 	scanningLabel.TextSize = 12
 
 	installStatusLabel := widget.NewLabel("")
+	installStatusLabel.Wrapping = fyne.TextWrapWord
 	var installLogText string
 	installLogLabel := widget.NewLabel("")
 	installLogLabel.Wrapping = fyne.TextWrapWord
@@ -187,14 +189,16 @@ func RunWizard(configPath string) error {
 				discoveryRows.Refresh()
 			})
 
-			if hasRealPython(infos) {
+			needPython := !hasRealPython(infos)
+			needBash := !hasRealBash(infos)
+			if !needPython && !needBash {
 				fyne.Do(func() { finishBtn.Enable() })
 				return
 			}
 
-			// Python missing — auto-install.
+			// Python and/or a full bash environment missing — auto-install.
 			fyne.Do(func() {
-				installStatusLabel.SetText("Python not found — installing…")
+				installStatusLabel.SetText(installPromptText(needPython, needBash))
 				installLogText = ""
 				installLogLabel.SetText("")
 				installSection.Show()
@@ -209,9 +213,17 @@ func RunWizard(configPath string) error {
 				})
 			}
 
-			installErr := installer.InstallPython(context.Background(), emit)
+			var installErr error
+			if needPython {
+				installErr = installer.InstallPython(context.Background(), emit)
+			}
+			if needBash {
+				if err := installer.InstallGitBash(context.Background(), emit); err != nil && installErr == nil {
+					installErr = err
+				}
+			}
 
-			// Re-probe to pick up the newly installed binary.
+			// Re-probe to pick up the newly installed binaries.
 			recheck := interpreter.Discover(context.Background())
 			recheckFound := make(map[string]string)
 			recheckRows := buildRows(recheck, recheckFound)
@@ -225,10 +237,12 @@ func RunWizard(configPath string) error {
 			fyne.Do(func() {
 				discoveryRows.Objects = recheckRows
 				discoveryRows.Refresh()
-				if installErr != nil || !hasRealPython(recheck) {
-					installStatusLabel.SetText("Python install failed — install manually then re-run setup.")
+				pythonStillMissing := needPython && !hasRealPython(recheck)
+				bashStillMissing := needBash && !hasRealBash(recheck)
+				if pythonStillMissing || bashStillMissing {
+					installStatusLabel.SetText(installFailureText(pythonStillMissing, bashStillMissing))
 				} else {
-					installStatusLabel.SetText("✓ Python installed successfully.")
+					installStatusLabel.SetText("✓ Installed successfully.")
 				}
 				installStatusLabel.Refresh()
 				finishBtn.Enable()
@@ -473,4 +487,39 @@ func hasRealPython(infos []interpreter.Info) bool {
 		}
 	}
 	return false
+}
+
+// hasRealBash reports whether a system bash install was found.
+func hasRealBash(infos []interpreter.Info) bool {
+	for _, info := range infos {
+		if info.Name == "bash" && info.Status == interpreter.StatusFound {
+			return true
+		}
+	}
+	return false
+}
+
+func installPromptText(needPython, needBash bool) string {
+	switch {
+	case needPython && needBash:
+		return "Python and a full bash environment not found — installing…"
+	case needPython:
+		return "Python not found — installing…"
+	default:
+		return "Full bash environment not found — installing Git for Windows…"
+	}
+}
+
+// installFailureText reports which auto-installs didn't stick, each with a
+// manual-install link — shown when the automatic winget/download install
+// fails (no network, no winget, locked-down machine, etc.).
+func installFailureText(pythonMissing, bashMissing bool) string {
+	var lines []string
+	if pythonMissing {
+		lines = append(lines, "Python install failed — install manually: https://www.python.org/downloads/")
+	}
+	if bashMissing {
+		lines = append(lines, "Git for Windows (bash) install failed — install manually: https://git-scm.com/download/win")
+	}
+	return strings.Join(lines, "\n")
 }
