@@ -489,7 +489,6 @@ func hasRealPython(infos []interpreter.Info) bool {
 	return false
 }
 
-// hasRealBash reports whether a system bash install was found.
 func hasRealBash(infos []interpreter.Info) bool {
 	for _, info := range infos {
 		if info.Name == "bash" && info.Status == interpreter.StatusFound {
@@ -510,9 +509,6 @@ func installPromptText(needPython, needBash bool) string {
 	}
 }
 
-// installFailureText reports which auto-installs didn't stick, each with a
-// manual-install link — shown when the automatic winget/download install
-// fails (no network, no winget, locked-down machine, etc.).
 func installFailureText(pythonMissing, bashMissing bool) string {
 	var lines []string
 	if pythonMissing {
