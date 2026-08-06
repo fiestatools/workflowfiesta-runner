@@ -184,6 +184,7 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: darwin
           GOARCH: arm64
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
         run: |
           go build \
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
@@ -225,6 +226,7 @@ jobs:
           GOARCH: amd64
           CC: "clang -arch x86_64"
           CXX: "clang++ -arch x86_64"
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
         run: |
           go build \
             -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
