@@ -108,6 +108,11 @@ func resolve(name string) (string, Status) {
 	return path, status
 }
 
+func ResolveBash() (string, bool) {
+	path, status := resolve("bash")
+	return path, status == StatusFound
+}
+
 func resolveDirect(name string) (string, Status) {
 	// Check static system-wide paths first.
 	for _, p := range staticCandidates[name] {

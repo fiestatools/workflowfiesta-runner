@@ -18,6 +18,7 @@ func installPython(ctx context.Context, emit func(string)) error {
 	if winget, err := exec.LookPath("winget"); err == nil {
 		return runAndStream(ctx, emit, winget,
 			"install", "--id", "Python.Python.3.13",
+			"--source", "winget",
 			"--scope", "user",
 			"--silent",
 			"--accept-package-agreements",
