@@ -516,7 +516,7 @@ var registerLocalCmd = &cobra.Command{
 		}
 
 		result, err := localui.RunRegisterWizard(configPath)
-		if err != nil {
+		if err != nil { //nolint:staticcheck // headless stub always returns an error
 			return err
 		}
 		if result == nil {
