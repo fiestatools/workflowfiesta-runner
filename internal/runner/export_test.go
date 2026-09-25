@@ -16,7 +16,7 @@ import (
 // The semaphore defaults to 4 concurrent jobs.
 func NewForTest(exec executor.Executor, _ interface{}) *Runner {
 	return &Runner{
-		client:    api.New("http://localhost:0", "test-token"),
+		client:    api.New("http://localhost:0", "test-token", "test-version"),
 		executor:  exec,
 		semaphore: make(chan struct{}, 4),
 	}
@@ -28,7 +28,7 @@ func NewForTestWithConcurrency(exec executor.Executor, _ interface{}, maxJobs in
 		maxJobs = 4
 	}
 	return &Runner{
-		client:    api.New("http://localhost:0", "test-token"),
+		client:    api.New("http://localhost:0", "test-token", "test-version"),
 		executor:  exec,
 		semaphore: make(chan struct{}, maxJobs),
 	}
@@ -72,7 +72,7 @@ func RunHandleRunLocalScript(r *Runner, ctx context.Context, job api.Job) {
 // NewForTestWithToolHandler creates a Runner with an injected executor and tool handler.
 func NewForTestWithToolHandler(exec executor.Executor, handler *executor.ToolHandler) *Runner {
 	return &Runner{
-		client:      api.New("http://localhost:0", "test-token"),
+		client:      api.New("http://localhost:0", "test-token", "test-version"),
 		executor:    exec,
 		toolHandler: handler,
 		semaphore:   make(chan struct{}, 4),
@@ -120,7 +120,7 @@ func (r *Runner) HandleAuthRevoked(err error) error {
 // NewForTestWithRevoked creates a Runner wired with an onRevoked callback.
 func NewForTestWithRevoked(onRevoked func(reason string)) *Runner {
 	return &Runner{
-		client:    api.New("http://localhost:0", "test-token"),
+		client:    api.New("http://localhost:0", "test-token", "test-version"),
 		semaphore: make(chan struct{}, 4),
 		onRevoked: onRevoked,
 	}

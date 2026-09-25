@@ -18,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	wfapi "workflowfiesta-runner/internal/api"
+	"workflowfiesta-runner/internal/api"
 	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/localui"
@@ -232,7 +232,7 @@ func buildClearConfigurationHandler(cfg *config.Config, configPath string, onSto
 	return func(deleteAuditLogs, deleteScripts bool) error {
 		// Best-effort: unregister the runner on the server first.
 		if cfg != nil && cfg.APIURL != "" && cfg.Token != "" && cfg.RunnerID != "" {
-			client := wfapi.New(cfg.APIURL, cfg.Token)
+			client := api.New(cfg.APIURL, cfg.Token, cfg.Version)
 			if cfg.LocalConfig != nil && cfg.LocalConfig.OrgID != "" {
 				client.SetOrgID(cfg.LocalConfig.OrgID)
 			}
@@ -345,7 +345,13 @@ The code embeds your organization, so you only need ONE thing: the code.`,
 			"shell":         platform.Shell(),
 		})
 
-		resp, err := http.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, apiURL+"/api/runner/register", bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("registration request failed: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		api.ApplyClientHeaders(req, version)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("registration request failed: %w", err)
 		}
@@ -510,7 +516,7 @@ var registerLocalCmd = &cobra.Command{
 		}
 
 		result, err := localui.RunRegisterWizard(configPath)
-		if err != nil {
+		if err != nil { //nolint:staticcheck // headless stub always returns an error
 			return err
 		}
 		if result == nil {
@@ -546,6 +552,7 @@ func init() {
 
 func main() {
 	log.SetFormatter(&darkFormatter{})
+	localui.Version = version
 
 	// No arguments: user double-clicked the binary.
 	if len(os.Args) == 1 {
@@ -568,6 +575,7 @@ func main() {
 
 		// GUI build: open the first-run wizard or status window.
 		localui.RunAutoLaunch(localconfig.DefaultPath(), func(cfg *config.Config) *localui.StatusWindow {
+			cfg.Version = version
 			ctx, cancel := context.WithCancel(context.Background())
 			configPath := localconfig.DefaultPath()
 			applyNamedAuditLog(cfg, cfg.LocalConfig, configPath)

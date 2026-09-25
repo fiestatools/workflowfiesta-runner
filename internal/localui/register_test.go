@@ -18,10 +18,23 @@ import (
 // ── callRegisterAPI ───────────────────────────────────────────────────────────
 
 func TestCallRegisterAPI_Success(t *testing.T) {
+	localui.Version = "v1.2.3"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/runner/register" {
 			http.NotFound(w, r)
 			return
+		}
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("registration must not send Authorization, got %q", r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("x-wf-client") != "runner" {
+			t.Errorf("x-wf-client = %q", r.Header.Get("x-wf-client"))
+		}
+		if r.Header.Get("x-wf-client-version") != "v1.2.3" {
+			t.Errorf("x-wf-client-version = %q", r.Header.Get("x-wf-client-version"))
+		}
+		if r.Header.Get("x-trace-id") == "" {
+			t.Error("expected x-trace-id")
 		}
 		// Verify the request body shape.
 		body, _ := io.ReadAll(r.Body)

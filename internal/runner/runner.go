@@ -65,7 +65,7 @@ type Runner struct {
 }
 
 func New(cfg *config.Config) *Runner {
-	client := api.New(cfg.APIURL, cfg.Token)
+	client := api.New(cfg.APIURL, cfg.Token, cfg.Version)
 	// Seed org ID from persisted local config so all requests (including the
 	// first heartbeat on restart) include X-Org-Id for fast tenant routing.
 	if cfg.LocalConfig != nil && cfg.LocalConfig.OrgID != "" {

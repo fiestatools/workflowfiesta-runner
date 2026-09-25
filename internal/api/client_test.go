@@ -12,7 +12,33 @@ import (
 )
 
 func newTestClient(srv *httptest.Server) *api.Client {
-	return api.New(srv.URL, "test-token")
+	return api.New(srv.URL, "test-token", "test-version")
+}
+
+func TestClient_SendsClientHeaders(t *testing.T) {
+	var headers http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server)
+	if _, _, err := client.PollNextJob(); err != nil {
+		t.Fatalf("PollNextJob failed: %v", err)
+	}
+	if headers.Get("Authorization") != "Bearer test-token" {
+		t.Errorf("Authorization = %q", headers.Get("Authorization"))
+	}
+	if headers.Get("x-wf-client") != "runner" {
+		t.Errorf("x-wf-client = %q", headers.Get("x-wf-client"))
+	}
+	if headers.Get("x-wf-client-version") != "test-version" {
+		t.Errorf("x-wf-client-version = %q", headers.Get("x-wf-client-version"))
+	}
+	if headers.Get("x-trace-id") == "" {
+		t.Error("expected x-trace-id")
+	}
 }
 
 // ── PollNextJob ───────────────────────────────────────────────────────────────

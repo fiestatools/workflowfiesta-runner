@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	fyne.io/fyne/v2 v2.7.3
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/google/uuid v1.6.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.42.0
@@ -57,7 +58,6 @@ require (
 	github.com/go-text/typesetting v0.3.4 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/hack-pad/go-indexeddb v0.3.2 // indirect
 	github.com/hack-pad/safejs v0.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
