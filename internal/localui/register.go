@@ -24,6 +24,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"workflowfiesta-runner/internal/api"
 	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/platform"
@@ -709,8 +710,14 @@ func callRegisterAPI(apiURL, code string) (*RegistrationResult, error) {
 		"shell":         platform.Shell(),
 	}
 	bodyBytes, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest(http.MethodPost, apiURL+"/api/runner/register", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("registration request failed: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	api.ApplyClientHeaders(req, Version)
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Post(apiURL+"/api/runner/register", "application/json", bytes.NewReader(bodyBytes))
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, friendlyNetworkError(err, apiURL)
 	}

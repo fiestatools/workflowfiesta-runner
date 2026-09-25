@@ -12,6 +12,10 @@ import "time"
 // Set to true before calling any UI functions when running without a display.
 var Headless bool
 
+// Version is the runner binary version sent as x-wf-client-version.
+// main sets it from the link-time version before any UI runs.
+var Version string
+
 // ApprovalResult captures the user's permission decision.
 type ApprovalResult int
 

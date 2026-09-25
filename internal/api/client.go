@@ -10,10 +10,29 @@ import (
 	"strings"
 	"sync"
 	"time"
-	log "github.com/sirupsen/logrus"
 	"workflowfiesta-runner/internal/httputil"
 	"workflowfiesta-runner/internal/platform"
+
+	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 )
+
+const (
+	headerClient        = "x-wf-client"
+	headerClientVersion = "x-wf-client-version"
+	headerTraceID       = "x-trace-id"
+	clientName          = "runner"
+)
+
+// ApplyClientHeaders sets the client name, version, and a new request id.
+// Registration uses this directly. Authenticated calls use it from do.
+func ApplyClientHeaders(req *http.Request, version string) {
+	req.Header.Set(headerClient, clientName)
+	if version != "" {
+		req.Header.Set(headerClientVersion, version)
+	}
+	req.Header.Set(headerTraceID, uuid.NewString())
+}
 
 type Job struct {
 	JobID          string                 `json:"jobId"`
@@ -30,15 +49,17 @@ type Job struct {
 type Client struct {
 	apiURL     string
 	token      string
+	version    string
 	orgID      string
 	mu         sync.Mutex
 	httpClient *http.Client
 }
 
-func New(apiURL, token string) *Client {
+func New(apiURL, token string, version string) *Client {
 	return &Client{
-		apiURL: apiURL,
-		token:  token,
+		apiURL:  apiURL,
+		token:   token,
+		version: version,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -67,6 +88,7 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	ApplyClientHeaders(req, c.version)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
