@@ -330,6 +330,12 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # upload-artifact strips file modes; restore the exec bit before signing/zipping.
+      - name: Restore executable permissions
+        run: |
+          chmod +x dist/workflowfiesta-runner-darwin-*/Contents/MacOS/* 2>/dev/null || true
+          find dist -maxdepth 1 -type f -name 'workflowfiesta-runner-darwin-*' -exec chmod +x {} +
+
       - name: Import signing certificate
         env:
           CSC_LINK: ${{ secrets.mac_csc_link }}
