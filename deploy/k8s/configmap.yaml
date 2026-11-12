@@ -1,0 +1,27 @@
+# Non-secret runner settings.
+#
+# Keys are environment-variable names, so the Deployment consumes this whole
+# object with `envFrom` — you can add any runner setting here without editing
+# the Deployment. See deploy/k8s/README.md for the full list.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workflowfiesta-runner-config
+  namespace: workflowfiesta
+  labels:
+    app.kubernetes.io/name: workflowfiesta-runner
+data:
+  # Your WorkflowFiesta instance. Leave as-is for the hosted service; change it
+  # for a self-hosted install (e.g. https://api.your-company.com).
+  WORKFLOWFIESTA_API_URL: "https://api.workflowfiesta.com"
+
+  # Appears in this pod's logs. The name shown in the WorkflowFiesta UI is the
+  # one chosen when the registration code was issued, not this value.
+  WORKFLOWFIESTA_RUNNER_NAME: "k8s-runner"
+
+  # Maximum script Jobs this runner will have in flight at once.
+  WORKFLOWFIESTA_MAX_CONCURRENT_JOBS: "4"
+
+  # Uncomment if your Environments reference images from a private registry.
+  # The named Secret is attached as an imagePullSecret to each script Job.
+  # KUBERNETES_IMAGE_PULL_SECRET: "my-registry-creds"

@@ -172,9 +172,9 @@ On macOS/Windows, double-click the GUI binary. If no token is saved, the first-r
 |---|---|---|
 | `WORKFLOWFIESTA_TOKEN` | — | Runner authentication token (required) |
 | `WORKFLOWFIESTA_API_URL` | `https://api.workflowfiesta.com` | Base URL of the WorkflowFiesta API |
-| `WORKFLOWFIESTA_RUNNER_ID` | — | Runner ID obtained via `register` |
-| `WORKFLOWFIESTA_RUNNER_NAME` | `unnamed-runner` | Human-readable name shown in the UI |
-| `WORKFLOWFIESTA_LABELS` | — | Comma-separated labels (e.g. `linux,x86_64,gpu`) for job routing |
+| `WORKFLOWFIESTA_RUNNER_ID` | — | Runner ID obtained via `register`. Saved by the GUI wizard, but **not read at runtime** — the token identifies the runner |
+| `WORKFLOWFIESTA_RUNNER_NAME` | `unnamed-runner` | Human-readable name used in this process's log output. The name shown in the UI is the one chosen when the registration code was issued |
+| `WORKFLOWFIESTA_LABELS` | — | Comma-separated labels. Parsed but **not currently used** — the heartbeat does not transmit them, so they do not affect job routing yet |
 | `WORKFLOWFIESTA_MAX_CONCURRENT_JOBS` | `4` | Maximum simultaneous jobs |
 | `CONTAINER_RUNTIME` | auto-detect | `docker`, `kubernetes`, or `local` |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker daemon socket path (Docker mode only) |
