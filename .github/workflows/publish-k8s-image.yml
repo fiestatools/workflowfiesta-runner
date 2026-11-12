@@ -51,8 +51,12 @@ jobs:
           file: deploy/k8s/Dockerfile
           platforms: linux/amd64
           push: true
+          # Stamped into `workflowfiesta-runner version`. Prefer the release
+          # tag, then a manually supplied tag, and only fall back to the commit
+          # SHA when neither is available — a dispatch with `tag` set should
+          # report that tag, not the SHA.
           build-args: |
-            VERSION=${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+            VERSION=${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag != '' && inputs.tag || github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
