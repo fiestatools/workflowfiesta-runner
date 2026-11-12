@@ -1,0 +1,43 @@
+# Least-privilege RBAC for the runner, scoped to its own namespace.
+#
+# The runner needs exactly three things:
+#   - create/delete batch/Jobs       (one short-lived Job per script step)
+#   - watch/get pods                 (find the Job's pod and wait for it)
+#   - get pods/log                   (stream script output back to the API)
+#
+# Script pods run under the namespace's default ServiceAccount — the runner
+# never sets serviceAccountName on the Jobs it creates, so the permissions
+# below are not inherited by user scripts.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflowfiesta-runner
+  namespace: workflowfiesta
+  labels:
+    app.kubernetes.io/name: workflowfiesta-runner
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflowfiesta-runner
+  namespace: workflowfiesta
+  labels:
+    app.kubernetes.io/name: workflowfiesta-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: workflowfiesta-runner
+subjects:
+  - kind: ServiceAccount
+    name: workflowfiesta-runner
+    namespace: workflowfiesta

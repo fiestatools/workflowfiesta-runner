@@ -148,24 +148,19 @@ docker build -t workflowfiesta-runner .
 
 Deploy the runner as a Deployment. No Docker socket mount is needed — the runner creates Kubernetes Jobs instead.
 
-```yaml
-# k8s/runner/deployment.yaml (included in the workflowfiesta repo)
-env:
-  - name: CONTAINER_RUNTIME
-    value: kubernetes
-  - name: KUBERNETES_NAMESPACE
-    valueFrom:
-      fieldRef:
-        fieldPath: metadata.namespace
-```
-
-The runner pod needs a ServiceAccount with permission to manage `batch/jobs` and read `pods`/`pods/log`. Reference RBAC manifests are included in the WorkflowFiesta repo at `k8s/runner/`.
+A purpose-built image and reference manifests live in [`deploy/k8s/`](deploy/k8s/). That image runs as a non-root user, defaults to `CONTAINER_RUNTIME=kubernetes`, and is published to `ghcr.io/fiestatools/workflowfiesta-runner-k8s`.
 
 ```sh
-kubectl apply -f k8s/runner/serviceaccount.yaml
-kubectl apply -f k8s/runner/rbac.yaml
-kubectl apply -f k8s/runner/deployment.yaml
+kubectl apply -f deploy/k8s/namespace.yaml
+kubectl -n workflowfiesta create secret generic wf-runner-creds \
+  --from-literal=token=<TOKEN> \
+  --from-literal=runner-id=<RUNNER_ID>
+kubectl apply -f deploy/k8s/serviceaccount.yaml
+kubectl apply -f deploy/k8s/rbac.yaml
+kubectl apply -f deploy/k8s/deployment.yaml
 ```
+
+The runner pod needs a ServiceAccount with permission to manage `batch/jobs` and read `pods`/`pods/log`; `deploy/k8s/rbac.yaml` grants exactly that, scoped to one namespace. See [`deploy/k8s/README.md`](deploy/k8s/README.md) for configuration and caveats.
 
 ### Desktop GUI (double-click)
 
