@@ -56,9 +56,12 @@ WORKDIR /workspace
 
 # CONTAINER_RUNTIME is also auto-detected from KUBERNETES_SERVICE_HOST, but
 # setting it explicitly keeps the behaviour obvious and overridable.
+#
+# WORKFLOWFIESTA_LABELS is deliberately not set: config.Load parses it into
+# cfg.Labels, but nothing reads that field and the heartbeat does not send it,
+# so a default here would imply routing behaviour that does not exist.
 ENV HOME=/home/runner \
-    CONTAINER_RUNTIME=kubernetes \
-    WORKFLOWFIESTA_LABELS=linux,x86_64,kubernetes
+    CONTAINER_RUNTIME=kubernetes
 
 ENTRYPOINT ["/usr/bin/tini", "--", "workflowfiesta-runner"]
 CMD ["run"]

@@ -1,10 +1,17 @@
 # WorkflowFiesta self-hosted runner.
 #
-# Prerequisite: the credentials Secret, created from `register` output:
+# Prerequisites, in order:
+#   1. kubectl apply -f namespace.yaml
+#   2. kubectl apply -f configmap.yaml          (edit API URL if self-hosted)
+#   3. the token Secret, from `register` output:
 #
-#   kubectl -n workflowfiesta create secret generic wf-runner-creds \
-#     --from-literal=token=<TOKEN> \
-#     --from-literal=runner-id=<RUNNER_ID>
+#        kubectl -n workflowfiesta create secret generic \
+#          workflowfiesta-runner-token \
+#          --from-literal=WORKFLOWFIESTA_TOKEN=<TOKEN>
+#
+#   4. kubectl apply -f serviceaccount.yaml -f rbac.yaml -f deployment.yaml
+#
+# The token is the only required value. See deploy/k8s/README.md.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,8 +20,8 @@ metadata:
   labels:
     app.kubernetes.io/name: workflowfiesta-runner
 spec:
-  # One replica only. Two pods sharing a runner ID would both claim jobs and
-  # fight over the same heartbeat/status record.
+  # One replica only. The token is the runner's identity, so two pods sharing
+  # it would both claim jobs and overwrite each other's heartbeat.
   replicas: 1
   strategy:
     type: Recreate
@@ -37,38 +44,30 @@ spec:
           image: ghcr.io/fiestatools/workflowfiesta-runner-k8s:latest
           imagePullPolicy: IfNotPresent
           args: ["run"]
+          # All tunable settings come from the ConfigMap and Secret, whose keys
+          # are environment-variable names. Add or change a setting there and
+          # restart — no edits to this Deployment needed.
+          envFrom:
+            - configMapRef:
+                name: workflowfiesta-runner-config
+            - secretRef:
+                name: workflowfiesta-runner-token
           env:
-            # Point at your WorkflowFiesta instance (self-hosted installs
-            # should use their own API hostname).
-            - name: WORKFLOWFIESTA_API_URL
-              value: https://api.workflowfiesta.com
-            - name: WORKFLOWFIESTA_RUNNER_NAME
-              value: k8s-runner
-            - name: WORKFLOWFIESTA_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: wf-runner-creds
-                  key: token
-            - name: WORKFLOWFIESTA_RUNNER_ID
-              valueFrom:
-                secretKeyRef:
-                  name: wf-runner-creds
-                  key: runner-id
-            - name: WORKFLOWFIESTA_MAX_CONCURRENT_JOBS
-              value: "4"
-            - name: CONTAINER_RUNTIME
-              value: kubernetes
-            # Script Jobs are created in the runner's own namespace. Without
-            # this the runner falls back to the "default" namespace, where it
-            # has no RBAC.
+            # These two must stay here rather than in the ConfigMap.
+            #
+            # KUBERNETES_NAMESPACE has to be a fieldRef, which a ConfigMap
+            # cannot express. It is also the single most important value to get
+            # right: the runner defaults it to "default", where this
+            # ServiceAccount has no RBAC, and the failure surfaces only when
+            # the first job arrives.
             - name: KUBERNETES_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # Uncomment if your Environments reference images from a private
-            # registry; the named Secret is attached to each script Job.
-            # - name: KUBERNETES_IMAGE_PULL_SECRET
-            #   value: my-registry-creds
+            # Auto-detected from KUBERNETES_SERVICE_HOST, but set explicitly so
+            # the mode is visible in `kubectl describe` and in the startup log.
+            - name: CONTAINER_RUNTIME
+              value: kubernetes
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
