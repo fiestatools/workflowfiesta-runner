@@ -36,3 +36,12 @@ func GetPodExitCodeWithClient(ctx context.Context, client kubernetes.Interface, 
 	k := &kubernetesExecutor{}
 	return k.getPodExitCode(ctx, client, namespace, podName)
 }
+
+// BuildJob exposes buildJob for unit tests.
+var BuildJob = buildJob
+
+// CheckImageAllowed exposes checkImageAllowed for unit tests.
+var CheckImageAllowed = checkImageAllowed
+
+// EffectiveTimeout exposes effectiveTimeout for unit tests.
+var EffectiveTimeout = effectiveTimeout
