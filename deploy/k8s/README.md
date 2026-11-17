@@ -89,6 +89,7 @@ Set on the Deployment's container; see the root README for the full list.
 | `CONTAINER_RUNTIME` | `kubernetes` | Set `local` to run scripts in the runner pod itself |
 | `KUBERNETES_NAMESPACE` | own namespace (fieldRef) | Where script Jobs are created |
 | `KUBERNETES_IMAGE_PULL_SECRET` | unset | Needed if Environments use private images |
+| `KUBERNETES_DEFAULT_IMAGE` | `public.ecr.aws/docker/library/debian:bookworm-slim` | Used only when a claimed job has an empty `dockerImage` |
 
 ## Notes
 
@@ -96,6 +97,11 @@ Set on the Deployment's container; see the root README for the full list.
   Environment `dockerImage` is used verbatim as the Job's image, so either
   point your Environments at images your cluster can reach or set
   `KUBERNETES_IMAGE_PULL_SECRET`.
+- **Empty `dockerImage`.** Chat `run_bash` currently omits `dockerImage`.
+  Kubernetes then rejects the Job (`containers[0].image: Required value`).
+  The runner fills that gap with `KUBERNETES_DEFAULT_IMAGE`, or
+  `public.ecr.aws/docker/library/debian:bookworm-slim` when the variable is unset.
+  An explicit job image is never replaced.
 - **One replica only.** Two pods sharing a runner ID would both claim jobs and
   overwrite each other's heartbeat, hence `replicas: 1` and
   `strategy: Recreate`.

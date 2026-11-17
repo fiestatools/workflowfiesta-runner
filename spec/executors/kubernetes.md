@@ -18,13 +18,16 @@ The Kubernetes executor is selected when:
 Execute(ctx, input)
   1. Build Kubernetes client (in-cluster or KUBECONFIG)
   2. Generate a unique Job name (wf-<6-hex-chars>)
-  3. Create batch/v1 Job
-  4. Watch Pods with label selector job-name=<jobName>
-  5. Wait for Pod to reach Running / Succeeded / Failed phase
-  6. Stream Pod logs (follow=true)
-  7. Poll for container Terminated status (up to 60 s)
-  8. Return (exitCode, error)
-  9. Delete Job with foreground propagation (deferred)
+  3. Resolve the container image. An explicit `dockerImage` is kept.
+     An empty image uses `KUBERNETES_DEFAULT_IMAGE`, then
+     `public.ecr.aws/docker/library/debian:bookworm-slim`.
+  4. Create batch/v1 Job
+  5. Watch Pods with label selector job-name=<jobName>
+  6. Wait for Pod to reach Running / Succeeded / Failed phase
+  7. Stream Pod logs (follow=true)
+  8. Poll for container Terminated status (up to 60 s)
+  9. Return (exitCode, error)
+  10. Delete Job with foreground propagation (deferred)
 ```
 
 ### 1. Kubernetes Client

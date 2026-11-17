@@ -20,6 +20,11 @@ import (
 	"workflowfiesta-runner/internal/config"
 )
 
+// DefaultKubeJobImage is the Job image used when WorkflowFiesta claims a job
+// with an empty dockerImage. Chat run_bash omits that field, and Kubernetes
+// rejects a container with no image.
+const DefaultKubeJobImage = "public.ecr.aws/docker/library/debian:bookworm-slim"
+
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9-]+`)
 
 func sanitizeJobName(name string) string {
@@ -50,10 +55,27 @@ type kubernetesExecutor struct {
 	cfg *config.Config
 }
 
+func (k *kubernetesExecutor) resolveJobImage(image string) string {
+	image = strings.TrimSpace(image)
+	if image != "" {
+		return image
+	}
+	if k.cfg != nil {
+		if fallback := strings.TrimSpace(k.cfg.KubeDefaultImage); fallback != "" {
+			return fallback
+		}
+	}
+	return DefaultKubeJobImage
+}
+
 func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	client, err := newK8sClient()
 	if err != nil {
 		return -1, err
+	}
+	image := k.resolveJobImage(input.Image)
+	if strings.TrimSpace(input.Image) == "" {
+		log.Warnf("job %s has no dockerImage; using %s", input.JobID, image)
 	}
 
 	namespace := k.cfg.KubeNamespace
@@ -84,7 +106,7 @@ func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, err
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{{
 						Name:    "runner",
-						Image:   input.Image,
+						Image:   image,
 						Command: []string{"/bin/sh", "-c", input.Script},
 						Env:     envVars,
 					}},
@@ -99,7 +121,7 @@ func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, err
 		}
 	}
 
-	log.Infof("Creating Kubernetes Job %s/%s (image: %s)", namespace, jobName, input.Image)
+	log.Infof("Creating Kubernetes Job %s/%s (image: %s)", namespace, jobName, image)
 
 	_, err = client.BatchV1().Jobs(namespace).Create(ctx, jobSpec, metav1.CreateOptions{})
 	if err != nil {
