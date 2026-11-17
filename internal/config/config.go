@@ -30,6 +30,7 @@ type Config struct {
 	LocalConfigPath     string                   // path to runner.yaml (local executor only)
 	LocalConfig         *localconfig.LocalConfig // loaded local config (set by run-local)
 	MaxConcurrentJobs   int                      // max simultaneous jobs (0 → default 4)
+	AllowInProcessTools bool                     // WORKFLOWFIESTA_ALLOW_IN_PROCESS_TOOLS (native tools, git worktrees); false for kubernetes
 	Version             string                   // binary version (set from ldflags by main)
 }
 
@@ -123,6 +124,16 @@ func Load() *Config {
 	}
 
 	cfg.KubeJob, cfg.KubeJobErr = LoadKubeJob()
+
+	// Native file tools and git worktrees run inside the runner process. In
+	// Kubernetes that process holds the Job-creating ServiceAccount token and
+	// the runner's WorkflowFiesta token, so they are off unless opted in.
+	cfg.AllowInProcessTools = executorType != "kubernetes"
+	if raw := strings.TrimSpace(os.Getenv("WORKFLOWFIESTA_ALLOW_IN_PROCESS_TOOLS")); raw != "" {
+		if b, err := strconv.ParseBool(raw); err == nil {
+			cfg.AllowInProcessTools = b
+		}
+	}
 
 	// Fall back to the saved credentials file if no token was found in env vars.
 	if cfg.Token == "" {

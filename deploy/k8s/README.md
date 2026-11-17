@@ -91,6 +91,7 @@ Set on the Deployment's container; see the root README for the full list.
 | `KUBERNETES_IMAGE_PULL_SECRET` | unset | Needed if Environments use private images |
 | `KUBERNETES_DEFAULT_IMAGE` | `public.ecr.aws/docker/library/debian:bookworm-slim` | Used only when a claimed job has an empty `dockerImage` |
 | `KUBERNETES_JOB_*` | see below | Script Job pod spec controls |
+| `WORKFLOWFIESTA_ALLOW_IN_PROCESS_TOOLS` | `false` in Kubernetes | Native file tools and git worktree jobs run inside the runner pod, which holds the Job-creating SA token and the runner token; they are refused unless set to `true` |
 
 ### Script Job controls
 
