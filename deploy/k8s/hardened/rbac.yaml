@@ -1,0 +1,31 @@
+# The runner's only permissions, in its own namespace. Nothing cluster-scoped.
+# RBAC cannot restrict Job contents; admission-policy.yaml does that.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflowfiesta-runner
+  namespace: workflowfiesta
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflowfiesta-runner
+  namespace: workflowfiesta
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: workflowfiesta-runner
+subjects:
+  - kind: ServiceAccount
+    name: workflowfiesta-runner
+    namespace: workflowfiesta

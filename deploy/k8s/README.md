@@ -114,7 +114,8 @@ table is in `spec/executors/kubernetes.md`; the common ones:
 
 Script pods always carry `app.kubernetes.io/managed-by=workflowfiesta-runner`
 and `app.kubernetes.io/component=script-job` on the pod template, so
-NetworkPolicies and admission policies can select them.
+NetworkPolicies and admission policies can select them. See
+[`hardened/`](hardened/) for a locked-down reference deployment.
 
 ## Notes
 

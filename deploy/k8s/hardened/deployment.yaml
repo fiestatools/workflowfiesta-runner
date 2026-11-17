@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workflowfiesta-runner
+  namespace: workflowfiesta
+  labels:
+    app.kubernetes.io/name: workflowfiesta-runner
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: workflowfiesta-runner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: workflowfiesta-runner
+    spec:
+      serviceAccountName: workflowfiesta-runner
+      # The runner needs its token to manage Jobs; script pods do not get one.
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          # Pin by digest. Get it with:
+          #   docker buildx imagetools inspect ghcr.io/fiestatools/workflowfiesta-runner-k8s:<tag>
+          image: ghcr.io/fiestatools/workflowfiesta-runner-k8s@sha256:REPLACE_WITH_DIGEST
+          imagePullPolicy: IfNotPresent
+          args: ["run"]
+          env:
+            - name: WORKFLOWFIESTA_API_URL
+              value: https://api.workflowfiesta.com
+            - name: WORKFLOWFIESTA_RUNNER_NAME
+              value: k8s-runner-hardened
+            - name: WORKFLOWFIESTA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: wf-runner-creds
+                  key: token
+            - name: WORKFLOWFIESTA_MAX_CONCURRENT_JOBS
+              value: "1"
+            - name: CONTAINER_RUNTIME
+              value: kubernetes
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: WORKFLOWFIESTA_ALLOW_IN_PROCESS_TOOLS
+              value: "false"
+            # ── Script Job controls ──
+            - name: KUBERNETES_JOB_SERVICE_ACCOUNT
+              value: wf-script-job
+            - name: KUBERNETES_JOB_AUTOMOUNT_SERVICE_ACCOUNT_TOKEN
+              value: "false"
+            - name: KUBERNETES_JOB_SECURITY_PROFILE
+              value: restricted
+            - name: KUBERNETES_JOB_NODE_SELECTOR
+              value: kubernetes.io/os=linux,kubernetes.io/arch=amd64
+            - name: KUBERNETES_JOB_CPU_REQUEST
+              value: 250m
+            - name: KUBERNETES_JOB_CPU_LIMIT
+              value: "1"
+            - name: KUBERNETES_JOB_MEMORY_REQUEST
+              value: 512Mi
+            - name: KUBERNETES_JOB_MEMORY_LIMIT
+              value: 2Gi
+            - name: KUBERNETES_JOB_EPHEMERAL_STORAGE_LIMIT
+              value: 1Gi
+            - name: KUBERNETES_JOB_MAX_TIMEOUT_SECONDS
+              value: "900"
+            - name: KUBERNETES_JOB_ALLOWED_IMAGES
+              value: "REGISTRY/wf-script-job@sha256:"
+            - name: KUBERNETES_JOB_REQUIRE_IMAGE_DIGEST
+              value: "true"
+            # Jobs that arrive without an image (chat run_bash today) use this;
+            # it must satisfy the allowlist above.
+            - name: KUBERNETES_DEFAULT_IMAGE
+              value: "REGISTRY/wf-script-job@sha256:REPLACE_WITH_DIGEST"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - { name: home, mountPath: /home/runner }
+            - { name: workspace, mountPath: /workspace }
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi, ephemeral-storage: 64Mi }
+            limits: { cpu: 500m, memory: 512Mi, ephemeral-storage: 256Mi }
+      volumes:
+        - { name: home, emptyDir: {} }
+        - { name: workspace, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+      restartPolicy: Always
