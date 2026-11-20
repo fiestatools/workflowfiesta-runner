@@ -9,7 +9,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -19,6 +18,11 @@ import (
 
 	"workflowfiesta-runner/internal/config"
 )
+
+// DefaultKubeJobImage is the Job image used when WorkflowFiesta claims a job
+// with an empty dockerImage. Chat run_bash omits that field, and Kubernetes
+// rejects a container with no image.
+const DefaultKubeJobImage = "public.ecr.aws/docker/library/debian:bookworm-slim"
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9-]+`)
 
@@ -50,56 +54,47 @@ type kubernetesExecutor struct {
 	cfg *config.Config
 }
 
+func (k *kubernetesExecutor) resolveJobImage(image string) string {
+	image = strings.TrimSpace(image)
+	if image != "" {
+		return image
+	}
+	if k.cfg != nil {
+		if fallback := strings.TrimSpace(k.cfg.KubeDefaultImage); fallback != "" {
+			return fallback
+		}
+	}
+	return DefaultKubeJobImage
+}
+
 func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	client, err := newK8sClient()
 	if err != nil {
 		return -1, err
+	}
+	image := k.resolveJobImage(input.Image)
+	if strings.TrimSpace(input.Image) == "" {
+		log.Warnf("job %s has no dockerImage; using %s", input.JobID, image)
 	}
 
 	namespace := k.cfg.KubeNamespace
 	suffix := fmt.Sprintf("%06x", rand.Int63n(0xFFFFFF))
 	jobName := sanitizeJobName(fmt.Sprintf("wf-%s", suffix))
 
-	backoffLimit := int32(0)
-	ttl := int32(300) // clean up after 5 minutes
-
-	envVars := make([]corev1.EnvVar, 0, len(input.EnvVars))
-	for key, val := range input.EnvVars {
-		envVars = append(envVars, corev1.EnvVar{Name: key, Value: val})
+	if err := checkImageAllowed(k.cfg.KubeJob, image); err != nil {
+		return -1, err
+	}
+	timeout := effectiveTimeout(k.cfg.KubeJob, input.Timeout)
+	if timeout != input.Timeout {
+		log.Warnf("job %s timeout %v capped to %v by KUBERNETES_JOB_MAX_TIMEOUT_SECONDS", input.JobID, input.Timeout, timeout)
 	}
 
-	jobSpec := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "workflowfiesta-runner",
-			},
-		},
-		Spec: batchv1.JobSpec{
-			BackoffLimit:            &backoffLimit,
-			TTLSecondsAfterFinished: &ttl,
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					Containers: []corev1.Container{{
-						Name:    "runner",
-						Image:   input.Image,
-						Command: []string{"/bin/sh", "-c", input.Script},
-						Env:     envVars,
-					}},
-				},
-			},
-		},
+	jobSpec, err := buildJob(k.cfg, jobName, input, image, timeout)
+	if err != nil {
+		return -1, err
 	}
 
-	if k.cfg.KubeImagePullSecret != "" {
-		jobSpec.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{
-			{Name: k.cfg.KubeImagePullSecret},
-		}
-	}
-
-	log.Infof("Creating Kubernetes Job %s/%s (image: %s)", namespace, jobName, input.Image)
+	log.Infof("Creating Kubernetes Job %s/%s (image: %s)", namespace, jobName, image)
 
 	_, err = client.BatchV1().Jobs(namespace).Create(ctx, jobSpec, metav1.CreateOptions{})
 	if err != nil {
@@ -115,7 +110,7 @@ func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, err
 	}()
 
 	// Wait for the job's pod to appear and become Running, then stream logs
-	timeoutCtx, cancel := context.WithTimeout(ctx, input.Timeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	podName, err := k.waitForPod(timeoutCtx, client, namespace, jobName)

@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"k8s.io/client-go/kubernetes"
+
+	"workflowfiesta-runner/internal/config"
 )
 
 // Expose internal helpers for testing.
@@ -14,6 +16,12 @@ var CurrentOS = &currentOS
 
 // SanitizeJobName exposes sanitizeJobName for unit tests.
 var SanitizeJobName = sanitizeJobName
+
+// ResolveJobImage exposes kubernetesExecutor.resolveJobImage for unit tests.
+func ResolveJobImage(cfg *config.Config, image string) string {
+	k := &kubernetesExecutor{cfg: cfg}
+	return k.resolveJobImage(image)
+}
 
 // WaitForPodWithClient exposes kubernetesExecutor.waitForPod for unit tests,
 // accepting an explicit client so tests can inject a fake.
@@ -28,3 +36,12 @@ func GetPodExitCodeWithClient(ctx context.Context, client kubernetes.Interface, 
 	k := &kubernetesExecutor{}
 	return k.getPodExitCode(ctx, client, namespace, podName)
 }
+
+// BuildJob exposes buildJob for unit tests.
+var BuildJob = buildJob
+
+// CheckImageAllowed exposes checkImageAllowed for unit tests.
+var CheckImageAllowed = checkImageAllowed
+
+// EffectiveTimeout exposes effectiveTimeout for unit tests.
+var EffectiveTimeout = effectiveTimeout

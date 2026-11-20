@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"workflowfiesta-runner/internal/api"
+	"workflowfiesta-runner/internal/config"
 	"workflowfiesta-runner/internal/executor"
 	"workflowfiesta-runner/internal/localconfig"
 )
@@ -134,3 +135,11 @@ var ReposCacheDir = reposCacheDir
 
 // WorktreePath exposes the package-level worktreePath for unit tests.
 var WorktreePath = worktreePath
+
+// NewForTestWithConfig creates a Runner like NewForTest but with a config, so
+// config-driven guards can be exercised.
+func NewForTestWithConfig(exec executor.Executor, cfg *config.Config) *Runner {
+	r := NewForTest(exec, nil)
+	r.cfg = cfg
+	return r
+}
