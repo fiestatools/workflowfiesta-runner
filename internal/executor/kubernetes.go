@@ -23,7 +23,20 @@ import (
 // DefaultKubeJobImage is the Job image used when WorkflowFiesta claims a job
 // with an empty dockerImage. Chat run_bash omits that field, and Kubernetes
 // rejects a container with no image.
-const DefaultKubeJobImage = "public.ecr.aws/docker/library/debian:bookworm-slim"
+//
+// The image must provide /bin/bash. Debian bookworm-slim does not: its /bin/sh
+// is dash, and it has no curl or python3. deploy/k8s/job.Dockerfile is the
+// image to pin with KUBERNETES_DEFAULT_IMAGE. This public fallback only
+// guarantees bash, so a script that needs curl or python3 should set the
+// variable to the job image.
+const DefaultKubeJobImage = "public.ecr.aws/docker/library/ubuntu:24.04"
+
+// scriptCommand runs the claimed script with bash, matching the docker
+// executor. /bin/sh on the old default image is dash, which rejects bash
+// syntax and still exits 0 when a later command succeeds.
+func scriptCommand(script string) []string {
+	return []string{"/bin/bash", "-c", script}
+}
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9-]+`)
 
@@ -107,7 +120,7 @@ func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, err
 					Containers: []corev1.Container{{
 						Name:    "runner",
 						Image:   image,
-						Command: []string{"/bin/sh", "-c", input.Script},
+						Command: scriptCommand(input.Script),
 						Env:     envVars,
 					}},
 				},

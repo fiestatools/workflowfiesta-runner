@@ -54,6 +54,19 @@ func TestResolveJobImage_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
+func TestScriptCommand_UsesBash(t *testing.T) {
+	got := executor.ScriptCommand("echo hi")
+	want := []string{"/bin/bash", "-c", "echo hi"}
+	if len(got) != len(want) {
+		t.Fatalf("command = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("command = %#v, want %#v", got, want)
+		}
+	}
+}
+
 func TestSanitizeJobName_LowercasesInput(t *testing.T) {
 	got := executor.SanitizeJobName("MyJob-ABC")
 	if got != strings.ToLower(got) {
@@ -161,7 +174,7 @@ func TestKubernetes_JobSpec_HasCorrectLabels(t *testing.T) {
 					Containers: []corev1.Container{{
 						Name:    "runner",
 						Image:   "alpine:latest",
-						Command: []string{"/bin/sh", "-c", "echo hello"},
+						Command: executor.ScriptCommand("echo hello"),
 					}},
 				},
 			},

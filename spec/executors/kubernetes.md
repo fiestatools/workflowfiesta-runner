@@ -61,7 +61,7 @@ spec:
       containers:
         - name: runner
           image: <input.Image>
-          command: ["/bin/sh", "-c", "<input.Script>"]
+          command: ["/bin/bash", "-c", "<input.Script>"]
           env: <input.EnvVars>
       imagePullSecrets:    # added only when KUBERNETES_IMAGE_PULL_SECRET is set
         - name: <secret>
