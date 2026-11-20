@@ -20,6 +20,24 @@ import (
 	"workflowfiesta-runner/internal/config"
 )
 
+// DefaultKubeJobImage is the Job image used when WorkflowFiesta claims a job
+// with an empty dockerImage. Chat run_bash omits that field, and Kubernetes
+// rejects a container with no image.
+//
+// The image must provide /bin/bash. Debian bookworm-slim does not: its /bin/sh
+// is dash, and it has no curl or python3. deploy/k8s/job.Dockerfile is the
+// image to pin with KUBERNETES_DEFAULT_IMAGE. This public fallback only
+// guarantees bash, so a script that needs curl or python3 should set the
+// variable to the job image.
+const DefaultKubeJobImage = "public.ecr.aws/docker/library/ubuntu:24.04"
+
+// scriptCommand runs the claimed script with bash, matching the docker
+// executor. /bin/sh on the old default image is dash, which rejects bash
+// syntax and still exits 0 when a later command succeeds.
+func scriptCommand(script string) []string {
+	return []string{"/bin/bash", "-c", script}
+}
+
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9-]+`)
 
 func sanitizeJobName(name string) string {
@@ -50,10 +68,27 @@ type kubernetesExecutor struct {
 	cfg *config.Config
 }
 
+func (k *kubernetesExecutor) resolveJobImage(image string) string {
+	image = strings.TrimSpace(image)
+	if image != "" {
+		return image
+	}
+	if k.cfg != nil {
+		if fallback := strings.TrimSpace(k.cfg.KubeDefaultImage); fallback != "" {
+			return fallback
+		}
+	}
+	return DefaultKubeJobImage
+}
+
 func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, error) {
 	client, err := newK8sClient()
 	if err != nil {
 		return -1, err
+	}
+	image := k.resolveJobImage(input.Image)
+	if strings.TrimSpace(input.Image) == "" {
+		log.Warnf("job %s has no dockerImage; using %s", input.JobID, image)
 	}
 
 	namespace := k.cfg.KubeNamespace
@@ -84,8 +119,8 @@ func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, err
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{{
 						Name:    "runner",
-						Image:   input.Image,
-						Command: []string{"/bin/sh", "-c", input.Script},
+						Image:   image,
+						Command: scriptCommand(input.Script),
 						Env:     envVars,
 					}},
 				},
@@ -99,7 +134,7 @@ func (k *kubernetesExecutor) Execute(ctx context.Context, input Input) (int, err
 		}
 	}
 
-	log.Infof("Creating Kubernetes Job %s/%s (image: %s)", namespace, jobName, input.Image)
+	log.Infof("Creating Kubernetes Job %s/%s (image: %s)", namespace, jobName, image)
 
 	_, err = client.BatchV1().Jobs(namespace).Create(ctx, jobSpec, metav1.CreateOptions{})
 	if err != nil {

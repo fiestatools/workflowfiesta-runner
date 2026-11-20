@@ -33,6 +33,40 @@ import (
 
 // ── sanitizeJobName ───────────────────────────────────────────────────────────
 
+func TestResolveJobImage_KeepsExplicitImage(t *testing.T) {
+	got := executor.ResolveJobImage(&config.Config{KubeDefaultImage: "debian:bookworm-slim"}, "alpine:3.20")
+	if got != "alpine:3.20" {
+		t.Fatalf("image = %q, want alpine:3.20", got)
+	}
+}
+
+func TestResolveJobImage_UsesConfiguredFallback(t *testing.T) {
+	got := executor.ResolveJobImage(&config.Config{KubeDefaultImage: " public.ecr.aws/docker/library/debian:bookworm-slim "}, "  ")
+	if got != "public.ecr.aws/docker/library/debian:bookworm-slim" {
+		t.Fatalf("image = %q", got)
+	}
+}
+
+func TestResolveJobImage_DefaultsWhenUnset(t *testing.T) {
+	got := executor.ResolveJobImage(nil, "")
+	if got != executor.DefaultKubeJobImage {
+		t.Fatalf("image = %q, want %q", got, executor.DefaultKubeJobImage)
+	}
+}
+
+func TestScriptCommand_UsesBash(t *testing.T) {
+	got := executor.ScriptCommand("echo hi")
+	want := []string{"/bin/bash", "-c", "echo hi"}
+	if len(got) != len(want) {
+		t.Fatalf("command = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("command = %#v, want %#v", got, want)
+		}
+	}
+}
+
 func TestSanitizeJobName_LowercasesInput(t *testing.T) {
 	got := executor.SanitizeJobName("MyJob-ABC")
 	if got != strings.ToLower(got) {
@@ -140,7 +174,7 @@ func TestKubernetes_JobSpec_HasCorrectLabels(t *testing.T) {
 					Containers: []corev1.Container{{
 						Name:    "runner",
 						Image:   "alpine:latest",
-						Command: []string{"/bin/sh", "-c", "echo hello"},
+						Command: executor.ScriptCommand("echo hello"),
 					}},
 				},
 			},
