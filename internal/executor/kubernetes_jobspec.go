@@ -117,7 +117,7 @@ func buildJob(cfg *config.Config, jobName string, input Input, image string, tim
 	container := corev1.Container{
 		Name:      "runner",
 		Image:     image,
-		Command:   []string{"/bin/sh", "-c", input.Script},
+		Command:   []string{"/bin/bash", "-c", input.Script},
 		Env:       envVars,
 		Resources: resources,
 	}

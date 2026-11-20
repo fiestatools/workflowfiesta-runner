@@ -26,6 +26,14 @@ func buildTestJob(t *testing.T, kj config.KubeJob, input executor.Input) *corev1
 	return &job.Spec.Template.Spec
 }
 
+func TestBuildJob_UsesBash(t *testing.T) {
+	pod := buildTestJob(t, config.KubeJob{}, executor.Input{Script: "echo hi"})
+	cmd := pod.Containers[0].Command
+	if len(cmd) != 3 || cmd[0] != "/bin/bash" || cmd[1] != "-c" || cmd[2] != "echo hi" {
+		t.Fatalf("command = %#v", cmd)
+	}
+}
+
 func TestBuildJob_PodTemplateCarriesSelectableLabels(t *testing.T) {
 	cfg := &config.Config{KubeNamespace: "ns", KubeJob: config.KubeJob{
 		SecurityProfile: config.KubeJobProfileNone,
