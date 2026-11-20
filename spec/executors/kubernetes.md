@@ -85,7 +85,7 @@ spec:
       containers:
         - name: runner
           image: <input.Image>
-          command: ["/bin/sh", "-c", "<input.Script>"]
+          command: ["/bin/bash", "-c", "<input.Script>"]
           env: <input.EnvVars, sorted> (+ HOME=/tmp when the root fs is read-only)
           resources: <KUBERNETES_JOB_{CPU,MEMORY,EPHEMERAL_STORAGE}_{REQUEST,LIMIT}>
           securityContext:        # profile restricted
