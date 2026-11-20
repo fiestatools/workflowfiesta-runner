@@ -65,6 +65,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # Used only when a claimed job has an empty dockerImage. Chat
+            # run_bash does not send one, and Kubernetes rejects that Job.
+            - name: KUBERNETES_DEFAULT_IMAGE
+              value: public.ecr.aws/docker/library/debian:bookworm-slim
             # Uncomment if your Environments reference images from a private
             # registry; the named Secret is attached to each script Job.
             # - name: KUBERNETES_IMAGE_PULL_SECRET

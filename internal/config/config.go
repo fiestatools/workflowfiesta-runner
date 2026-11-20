@@ -24,6 +24,9 @@ type Config struct {
 	ExecutorType        string                   // "docker", "kubernetes", or "local"
 	KubeNamespace       string                   // KUBERNETES_NAMESPACE
 	KubeImagePullSecret string                   // KUBERNETES_IMAGE_PULL_SECRET
+	KubeDefaultImage    string                   // KUBERNETES_DEFAULT_IMAGE, used when a job has no dockerImage
+	KubeJob             KubeJob                  // KUBERNETES_JOB_* pod spec controls for script Jobs
+	KubeJobErr          error                    // set when a KUBERNETES_JOB_* value is invalid
 	LocalConfigPath     string                   // path to runner.yaml (local executor only)
 	LocalConfig         *localconfig.LocalConfig // loaded local config (set by run-local)
 	MaxConcurrentJobs   int                      // max simultaneous jobs (0 → default 4)
@@ -114,9 +117,12 @@ func Load() *Config {
 		ExecutorType:        executorType,
 		KubeNamespace:       getEnv("KUBERNETES_NAMESPACE", "default"),
 		KubeImagePullSecret: os.Getenv("KUBERNETES_IMAGE_PULL_SECRET"),
+		KubeDefaultImage:    os.Getenv("KUBERNETES_DEFAULT_IMAGE"),
 		LocalConfigPath:     localConfigPath,
 		MaxConcurrentJobs:   maxConcurrentJobs,
 	}
+
+	cfg.KubeJob, cfg.KubeJobErr = LoadKubeJob()
 
 	// Fall back to the saved credentials file if no token was found in env vars.
 	if cfg.Token == "" {

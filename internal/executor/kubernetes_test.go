@@ -33,6 +33,27 @@ import (
 
 // ── sanitizeJobName ───────────────────────────────────────────────────────────
 
+func TestResolveJobImage_KeepsExplicitImage(t *testing.T) {
+	got := executor.ResolveJobImage(&config.Config{KubeDefaultImage: "debian:bookworm-slim"}, "alpine:3.20")
+	if got != "alpine:3.20" {
+		t.Fatalf("image = %q, want alpine:3.20", got)
+	}
+}
+
+func TestResolveJobImage_UsesConfiguredFallback(t *testing.T) {
+	got := executor.ResolveJobImage(&config.Config{KubeDefaultImage: " public.ecr.aws/docker/library/debian:bookworm-slim "}, "  ")
+	if got != "public.ecr.aws/docker/library/debian:bookworm-slim" {
+		t.Fatalf("image = %q", got)
+	}
+}
+
+func TestResolveJobImage_DefaultsWhenUnset(t *testing.T) {
+	got := executor.ResolveJobImage(nil, "")
+	if got != executor.DefaultKubeJobImage {
+		t.Fatalf("image = %q, want %q", got, executor.DefaultKubeJobImage)
+	}
+}
+
 func TestSanitizeJobName_LowercasesInput(t *testing.T) {
 	got := executor.SanitizeJobName("MyJob-ABC")
 	if got != strings.ToLower(got) {
