@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -244,6 +245,22 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
+// inProcessRefusal returns a non-empty reason when the job would run inside
+// the runner process (a native tool or a git worktree) and this runner does not
+// allow that. A nil cfg (tests, embedded use) keeps the historical behaviour.
+func (r *Runner) inProcessRefusal(job api.Job) string {
+	if r.cfg == nil || r.cfg.AllowInProcessTools {
+		return ""
+	}
+	switch {
+	case job.ToolName != "":
+		return fmt.Sprintf("refused tool %q: in-process tools are disabled on this runner (WORKFLOWFIESTA_ALLOW_IN_PROCESS_TOOLS=false)", job.ToolName)
+	case job.GitRepoURL != "":
+		return "refused git worktree job: in-process git checkouts are disabled on this runner (WORKFLOWFIESTA_ALLOW_IN_PROCESS_TOOLS=false)"
+	}
+	return ""
+}
+
 func scriptBlurb(script string) string {
 	for _, line := range strings.Split(script, "\n") {
 		line = strings.TrimSpace(line)
@@ -264,6 +281,19 @@ func (r *Runner) handleJob(ctx context.Context, job api.Job) {
 	// ── run_local_script: expand from library, then run through security-gated executor ──
 	if job.ToolName == "run_local_script" {
 		r.handleRunLocalScript(ctx, job)
+		return
+	}
+
+	// ── In-process work guard ─────────────────────────────────────────────────
+	// Native tools and git worktrees run inside the runner process, not in an
+	// isolated executor. Refuse them where that process must stay clean.
+	if reason := r.inProcessRefusal(job); reason != "" {
+		jlog.Warn(reason)
+		if reportErr := r.client.ReportJobFailed(job.JobID, reason); reportErr != nil {
+			jlog.WithError(reportErr).Warn("report-fail error")
+		}
+		r.notify(func(s StatusSink) { s.SetJobComplete(job.JobID, job.DockerImage, 1) })
+		r.notify(func(s StatusSink) { s.AppendLog("[runner] " + reason + "\n"); s.SetIdle() })
 		return
 	}
 

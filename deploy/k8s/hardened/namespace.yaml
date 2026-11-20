@@ -1,0 +1,16 @@
+# A namespace that holds ONLY the runner and its script Jobs.
+# Why dedicated: `create jobs` in a namespace lets the holder run a pod as any
+# ServiceAccount in that namespace and mount any Secret there. Sharing a
+# namespace with application workloads hands those identities and Secrets to
+# whoever controls the runner token.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workflowfiesta
+  labels:
+    app.kubernetes.io/part-of: workflowfiesta
+    # Pod Security Admission: reject anything weaker than "restricted".
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

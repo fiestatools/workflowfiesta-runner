@@ -1,0 +1,33 @@
+# Namespace-scoped, so it only affects the runner and its Jobs.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: workflowfiesta
+  namespace: workflowfiesta
+spec:
+  hard:
+    pods: "6"
+    count/jobs.batch: "10"
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    requests.ephemeral-storage: 4Gi
+    limits.ephemeral-storage: 8Gi
+    services: "0"
+    secrets: "4"
+    configmaps: "4"
+    persistentvolumeclaims: "0"
+---
+# Backstop for anything created without resources.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: workflowfiesta
+  namespace: workflowfiesta
+spec:
+  limits:
+    - type: Container
+      defaultRequest: { cpu: 100m, memory: 128Mi, ephemeral-storage: 256Mi }
+      default: { cpu: 500m, memory: 512Mi, ephemeral-storage: 1Gi }
+      max: { cpu: "2", memory: 4Gi, ephemeral-storage: 2Gi }

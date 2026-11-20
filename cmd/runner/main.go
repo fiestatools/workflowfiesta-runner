@@ -20,6 +20,7 @@ import (
 
 	"workflowfiesta-runner/internal/api"
 	"workflowfiesta-runner/internal/config"
+	"workflowfiesta-runner/internal/executor"
 	"workflowfiesta-runner/internal/localconfig"
 	"workflowfiesta-runner/internal/localui"
 	"workflowfiesta-runner/internal/platform"
@@ -297,6 +298,12 @@ var runCmd = &cobra.Command{
 		log.Infof("Executor type: %s", cfg.ExecutorType)
 		if cfg.ExecutorType == "docker" {
 			log.Infof("Docker socket: %s", cfg.DockerSocket)
+		}
+		if cfg.ExecutorType == "kubernetes" {
+			if err := executor.ValidateKubernetesConfig(cfg); err != nil {
+				return err
+			}
+			logKubeJobSettings(cfg)
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -626,4 +633,30 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// logKubeJobSettings prints the effective script Job controls (never values of
+// env vars passed to jobs) so operators can confirm the hardening is active.
+func logKubeJobSettings(cfg *config.Config) {
+	j := cfg.KubeJob
+	sa := j.ServiceAccountName
+	if sa == "" {
+		sa = "(namespace default)"
+	}
+	log.Infof("Job namespace: %s, service account: %s, automount token: %t", cfg.KubeNamespace, sa, j.AutomountToken)
+	log.Infof("Job security profile: %s, read-only root fs: %t, service links: %t", j.SecurityProfile, j.ReadOnlyRootFS, j.EnableServiceLinks)
+	log.Infof("Job resources: cpu %s/%s, memory %s/%s (request/limit)", orUnset(j.CPURequest), orUnset(j.CPULimit), orUnset(j.MemoryRequest), orUnset(j.MemoryLimit))
+	if len(j.AllowedImages) > 0 || j.RequireImageDigest {
+		log.Infof("Job image policy: %d allowed prefix(es), require digest: %t", len(j.AllowedImages), j.RequireImageDigest)
+	}
+	if j.MaxTimeoutSeconds > 0 {
+		log.Infof("Job max timeout: %ds", j.MaxTimeoutSeconds)
+	}
+}
+
+func orUnset(s string) string {
+	if s == "" {
+		return "unset"
+	}
+	return s
 }

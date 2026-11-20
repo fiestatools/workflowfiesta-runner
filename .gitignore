@@ -2,8 +2,8 @@
 workflowfiesta-runner
 workflowfiesta-runner-gui
 workflowfiesta-runner-*
-runner
-runner.exe
+/runner
+/runner.exe
 *.exe
 *.dll
 *.so

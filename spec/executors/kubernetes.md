@@ -18,13 +18,16 @@ The Kubernetes executor is selected when:
 Execute(ctx, input)
   1. Build Kubernetes client (in-cluster or KUBECONFIG)
   2. Generate a unique Job name (wf-<6-hex-chars>)
-  3. Create batch/v1 Job
-  4. Watch Pods with label selector job-name=<jobName>
-  5. Wait for Pod to reach Running / Succeeded / Failed phase
-  6. Stream Pod logs (follow=true)
-  7. Poll for container Terminated status (up to 60 s)
-  8. Return (exitCode, error)
-  9. Delete Job with foreground propagation (deferred)
+  3. Resolve the container image. An explicit `dockerImage` is kept.
+     An empty image uses `KUBERNETES_DEFAULT_IMAGE`, then
+     `public.ecr.aws/docker/library/debian:bookworm-slim`.
+  4. Create batch/v1 Job
+  5. Watch Pods with label selector job-name=<jobName>
+  6. Wait for Pod to reach Running / Succeeded / Failed phase
+  7. Stream Pod logs (follow=true)
+  8. Poll for container Terminated status (up to 60 s)
+  9. Return (exitCode, error)
+  10. Delete Job with foreground propagation (deferred)
 ```
 
 ### 1. Kubernetes Client
@@ -41,30 +44,63 @@ The name is sanitized: lowercased, non-alphanumeric characters replaced with `-`
 
 ### 3. Job Spec
 
+Before anything is created, the image is checked against
+`KUBERNETES_JOB_ALLOWED_IMAGES` / `KUBERNETES_JOB_REQUIRE_IMAGE_DIGEST`, and the
+server-requested timeout is capped by `KUBERNETES_JOB_MAX_TIMEOUT_SECONDS`.
+A rejected image fails the job without touching the cluster.
+
 ```yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: wf-<suffix>
   namespace: <KUBERNETES_NAMESPACE>
-  labels:
+  labels:                                   # same labels on the pod template
     app.kubernetes.io/managed-by: workflowfiesta-runner
+    app.kubernetes.io/component: script-job
+    <KUBERNETES_JOB_LABELS>
+  annotations:
+    workflowfiesta.com/job-id: <job id>
+    <KUBERNETES_JOB_ANNOTATIONS>
 spec:
-  backoffLimit: 0          # no retries
-  ttlSecondsAfterFinished: 300  # auto-cleanup after 5 min (belt-and-suspenders)
+  backoffLimit: 0                 # no retries
+  ttlSecondsAfterFinished: 300    # auto-cleanup after 5 min
+  activeDeadlineSeconds: <timeout + 60>   # kube kills the pod even if the runner dies
   template:
+    metadata:
+      labels: <as above>
+      annotations: <as above>
     spec:
       restartPolicy: Never
+      serviceAccountName: <KUBERNETES_JOB_SERVICE_ACCOUNT>     # omitted = namespace default
+      automountServiceAccountToken: false                       # unless ..._AUTOMOUNT_SERVICE_ACCOUNT_TOKEN=true
+      enableServiceLinks: <true; false with profile restricted>
+      nodeSelector: <KUBERNETES_JOB_NODE_SELECTOR>
+      tolerations: <KUBERNETES_JOB_TOLERATIONS>
+      runtimeClassName: <KUBERNETES_JOB_RUNTIME_CLASS>
+      securityContext:            # profile restricted only
+        runAsNonRoot: true
+        runAsUser/runAsGroup/fsGroup: <KUBERNETES_JOB_RUN_AS_USER, default 65532>
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: runner
           image: <input.Image>
-          command: ["/bin/sh", "-c", "<input.Script>"]
-          env: <input.EnvVars>
-      imagePullSecrets:    # added only when KUBERNETES_IMAGE_PULL_SECRET is set
+          command: ["/bin/bash", "-c", "<input.Script>"]
+          env: <input.EnvVars, sorted> (+ HOME=/tmp when the root fs is read-only)
+          resources: <KUBERNETES_JOB_{CPU,MEMORY,EPHEMERAL_STORAGE}_{REQUEST,LIMIT}>
+          securityContext:        # profile restricted
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true   # with emptyDir /tmp and /workspace
+      imagePullSecrets:           # only when KUBERNETES_IMAGE_PULL_SECRET is set
         - name: <secret>
 ```
 
-Resource limits are not set at the Job level; apply a `LimitRange` to the namespace if you need them.
+With `KUBERNETES_JOB_SECURITY_PROFILE=restricted` the pod passes the Pod
+Security Standards `restricted` level, so the Job namespace can carry
+`pod-security.kubernetes.io/enforce: restricted`. Scripts then run as a
+non-root UID and cannot `apt-get install`; use an Environment image that
+already contains the tools the scripts need.
 
 ### 4. Pod Watching
 
@@ -90,6 +126,22 @@ A deferred call deletes the Job with `PropagationPolicy: Foreground`, which wait
 |---|---|---|
 | `KUBERNETES_NAMESPACE` | `default` | Namespace for Job creation |
 | `KUBERNETES_IMAGE_PULL_SECRET` | *(empty)* | imagePullSecrets name; omitted if not set |
+| `KUBERNETES_JOB_SERVICE_ACCOUNT` | *(empty)* | serviceAccountName for script pods; empty = namespace `default` |
+| `KUBERNETES_JOB_AUTOMOUNT_SERVICE_ACCOUNT_TOKEN` | `false` | Mount the SA token into script pods |
+| `KUBERNETES_JOB_LABELS` / `_ANNOTATIONS` | *(empty)* | `k=v,k2=v2`, added to the Job and pod template; cannot override the managed-by/component labels |
+| `KUBERNETES_JOB_NODE_SELECTOR` | *(empty)* | `k=v,k2=v2` |
+| `KUBERNETES_JOB_TOLERATIONS` | *(empty)* | JSON array of core/v1 Toleration |
+| `KUBERNETES_JOB_RUNTIME_CLASS` | *(empty)* | e.g. `gvisor` or `kata` for a sandboxed runtime |
+| `KUBERNETES_JOB_{CPU,MEMORY,EPHEMERAL_STORAGE}_{REQUEST,LIMIT}` | *(empty)* | Kubernetes quantities, validated at startup |
+| `KUBERNETES_JOB_SECURITY_PROFILE` | `none` | `restricted` = PSS restricted pod/container securityContext |
+| `KUBERNETES_JOB_RUN_AS_USER` | `65532` | UID for the restricted profile (must be > 0) |
+| `KUBERNETES_JOB_READ_ONLY_ROOT_FILESYSTEM` | `false` (`true` when restricted) | Adds emptyDir `/tmp` and `/workspace`, sets `HOME=/tmp` |
+| `KUBERNETES_JOB_ENABLE_SERVICE_LINKS` | `true` (`false` when restricted) | Inject `*_SERVICE_HOST` env for every Service in the namespace |
+| `KUBERNETES_JOB_MAX_TIMEOUT_SECONDS` | `0` (no cap) | Upper bound on the server-requested job timeout |
+| `KUBERNETES_JOB_ALLOWED_IMAGES` | *(empty = any)* | Comma-separated image prefixes; others fail before a Job is created |
+| `KUBERNETES_JOB_REQUIRE_IMAGE_DIGEST` | `false` | Reject images that are not pinned with `@sha256:` |
+
+Invalid values stop `workflowfiesta-runner run` at startup.
 
 ---
 
